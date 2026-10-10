@@ -7,6 +7,11 @@ description: "Use when a host agent (Claude Code, Codex, OpenClaw, Gemini CLI, e
 
 适用：Claude Code、Codex、OpenClaw、Gemini CLI、Copilot CLI、内部 AI 程序等具备仓库读写能力的宿主 agent。不依赖 `./ai` 的调度；机械步骤（分支/stash/提交）可以直接用 `./ai work` / `./ai done`。
 
+执行模式（二选一，由提示词声明，默认 `step-confirm`）：
+
+- `step-confirm`：每个 task 闭环后暂停，等人工确认再继续（适合首次接入、高风险 spec）。
+- `full-auto`：全程不暂停，串行跑完所有 ready task（见下方「full-auto 模式」）。声明方式：提示词明确写「full-auto 执行」；机械层命令统一带 `AI_CONFIRM=1` 前缀（如 `AI_CONFIRM=1 ./ai done <spec> <task>`），跳过交互确认门。
+
 ## 启动检查
 
 1. 确认在业务仓库根目录
@@ -21,7 +26,18 @@ description: "Use when a host agent (Claude Code, Codex, OpenClaw, Gemini CLI, e
 2. `./ai work <spec-id> <task-id>` 切任务分支（脚本会 stash 无关脏区）
 3. 按 task-dev skill 的规则实现 + 验证 + 更新 04-acceptance
 4. `./ai done <spec-id> <task-id>` 跑质量门禁并本地提交
-5. 输出任务闭环摘要，暂停等待人工确认
+5. 输出任务闭环摘要；`step-confirm` 模式下暂停等待人工确认，`full-auto` 模式下直接进入下一个 task
+
+## full-auto 模式
+
+- `full-auto` 只对满足全部以下条件的 task 生效，任一不满足即**自动降级为暂停**并说明原因：
+  - `Complexity` 为 `S`
+  - `Depends On` 已完成
+  - 非高风险（DB migration、auth/权限、billing、风控、共享核心组件）
+  - 该 task 的验证与门禁刚刚通过
+- 机械层命令统一带 `AI_CONFIRM=1` 前缀，跳过 `./ai work` / `./ai done` 的交互确认。
+- push/MR 仍走人工确认（`full-auto` 不覆盖 `./ai pr`）；全 spec 串完后输出总报告，统一进入人工评审。
+- 每个 task 闭环的摘要（task id、验证证据、diffstat）仍然完整输出，只是不再等待确认。
 
 ## 暂停条件（硬性）
 
@@ -40,7 +56,7 @@ description: "Use when a host agent (Claude Code, Codex, OpenClaw, Gemini CLI, e
 - 未经确认直接合并到目标分支
 - 破坏性命令（人工确认前）
 - 验证未执行就声称测试通过
-- 未经人工确认自动继续下一个 task（即使都是 S 级）
+- `step-confirm` 模式下未经人工确认自动继续下一个 task（`full-auto` 模式下 S 级任务连续执行是明确授权的例外）
 
 ## 完成输出
 

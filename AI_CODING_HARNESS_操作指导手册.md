@@ -95,6 +95,10 @@ skills 一览（宿主 agent 按需加载）：
 
 对宿主 agent 说：「读取 `./ai skill serial-task` 指向的 SKILL.md，按 03-tasks.md 依赖顺序串行执行」。agent 会在每个 task 闭环后暂停；M/L、高风险、验证失败、规则冲突等场景强制暂停（见 SKILL.md 的暂停条件）。
 
+### 3.4 全自动连跑（full-auto）
+
+对宿主 agent 说：「读取 `./ai skill serial-task` 指向的 SKILL.md，**full-auto 执行**」。agent 对 S 级、非高风险、门禁刚通过的 task 连续串行执行不再逐步暂停（机械命令带 `AI_CONFIRM=1`）；遇到 M/L、高风险、验证失败、门禁失败任一情况自动停下说明原因；push/MR 仍需人工确认，全部跑完输出总报告。
+
 ## 4. 质量门禁（v2 新增，重点）
 
 - spec 阶段（spec-prep skill）就要求为每个 task 写 `- Validation Command:` 行到 `04-acceptance.md`，内容是 shell 可执行命令，如 `pytest tests/unit -k note_format`、`mvn compile`。
