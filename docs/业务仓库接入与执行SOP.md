@@ -42,6 +42,13 @@
 - 适用：一个 spec 有多个 task，agent 按依赖顺序连续推进。
 - 硬规则：每个 task 独立闭环（实现→验证→acceptance→提交）；M/L、高风险、验证失败、规则冲突、工作区异常时强制暂停。
 
+### 方案 D：最大并发子代理（parallel-task）
+
+- 入口：`./ai skill parallel-task`
+- 适用：宿主 agent 具备子代理/并行会话能力，希望把可并行的 task 同时开工。
+- 分工：主代理只派活（`./ai ready`）和管理进度文件（回收时统一勾选）；每个子代理独占一个 git worktree（`./ai worktree`）开发一个 task，门禁在 worktree 内按 task 分节执行；`./ai collect` 回收分支。
+- 硬规则：M/L、高风险 task 不进并发池（降级方案 C）；业务文件 merge 冲突停下走人工，不自动解决。
+
 ## 风险与限制
 
 - `M/L` 任务、DB migration、auth、权限、billing、风险逻辑不得自动推进，必须先人工确认设计和影响范围。

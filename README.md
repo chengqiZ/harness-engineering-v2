@@ -7,7 +7,7 @@ This repository is the reusable standards source for AI-assisted coding rollout.
 v1 的评估结论是「理念对、机械重」：流程哲学（spec 四件套、submodule 版本锁定、单 task 单 PR）与业界收敛方向一致，全部保留；重做的是机械层：
 
 - **去 Codex 绑定**：v1 的 `./ai` 用约 1300 行 bash 渲染提示词再调度 `codex exec`。v2 的 `./ai` 是纯机械层（分支/stash/检查/门禁/提交），AI 工作交给宿主 agent（Claude Code、Codex、OpenClaw、Gemini CLI 等）通过 `skills/` 按需加载执行。
-- **流程模板 → SKILL.md**：v1 的 6 个 prompt 模板 + 4 个 prepare_* 渲染脚本收敛为 4 个 SKILL.md（spec-prep / task-dev / pr-prep / serial-task）。宿主 agent 用 `./ai skill <name>` 取路径加载；不再需要脚本渲染提示词，也不再只限 Codex 可跑。
+- **流程模板 → SKILL.md**：v1 的 6 个 prompt 模板 + 4 个 prepare_* 渲染脚本收敛为 5 个 SKILL.md（spec-prep / task-dev / pr-prep / serial-task / parallel-task）。宿主 agent 用 `./ai skill <name>` 取路径加载；不再需要脚本渲染提示词，也不再只限 Codex 可跑。
 - **补质量门禁**：新增 `scripts/run_gate.sh`。`04-acceptance.md` 为每个 task 声明 `- Validation Command:`（shell 可执行判据），`./ai done` 逐条执行、全过才放行提交。v1 验收是人工打勾，无机器判据。
 - **吸收 v1 未提交改进**：v1 工作区里「编译/构建冒烟先行」的改动已并入 task-dev skill；带 `\r` 的 `.gitattributes` 笔误不带入。
 
@@ -46,7 +46,10 @@ Daily commands (mechanical layer only; AI work is done by your host agent via sk
 ```bash
 ./ai spec <spec-id> <source-doc>   # 骨架 + 占位检查 + 拷入需求文档
 ./ai next <spec-id>                # 下一个 ready task
+./ai ready <spec-id>               # 并行模式：全部可同时开工的 task
 ./ai work <spec-id> <task-id>      # 切任务分支（脏区自动 stash）
+./ai worktree <spec-id> <task-id>  # 并行模式：子代理隔离 worktree
+./ai collect <spec-id> <task-id>  # 并行模式：主代理回收+勾进度+清 worktree
 ./ai done <spec-id> <task-id>      # 跑验收门禁 + 本地提交
 ./ai pr <spec-id> <task-id> main   # 生成 MR 材料 + 推送（有人工确认门）
 ./ai run <spec-id> <source-doc>    # spec→next→work→done 一键串行
@@ -79,7 +82,8 @@ harness-engineering-v2/
 │   ├── spec-prep/SKILL.md            # 需求文档 → spec 四件套
 │   ├── task-dev/SKILL.md             # 单 task 开发 + 验证 + acceptance 更新
 │   ├── pr-prep/SKILL.md              # MR 材料生成
-│   └── serial-task/SKILL.md          # 宿主 agent 串行多 task 执行
+│   ├── serial-task/SKILL.md          # 宿主 agent 串行多 task 执行
+│   └── parallel-task/SKILL.md        # 主代理派活 + 最大并发子代理 worktree 并行执行
 ├── templates/                        # 写入业务仓库或供 AI 读取的模板
 │   ├── ai.sh                         # 业务仓库根目录 `./ai` 薄编排器
 │   ├── business-repo-AGENTS.md       # 业务仓库 `.ai-harness/AGENTS.md` 模板

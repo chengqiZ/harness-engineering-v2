@@ -65,6 +65,7 @@ skills 一览（宿主 agent 按需加载）：
 - `task-dev`：单 task 开发 + 验证 + acceptance 更新
 - `pr-prep`：MR 材料生成
 - `serial-task`：宿主 agent 串行多 task 执行（含硬性暂停条件）
+- `parallel-task`：主代理派活 + 最大并发子代理（worktree 隔离）并行执行
 
 ### 3.1 标准路径（每个需求的完整走法）
 
@@ -98,6 +99,10 @@ skills 一览（宿主 agent 按需加载）：
 ### 3.4 全自动连跑（full-auto）
 
 对宿主 agent 说：「读取 `./ai skill serial-task` 指向的 SKILL.md，**full-auto 执行**」。agent 对 S 级、非高风险、门禁刚通过的 task 连续串行执行不再逐步暂停（机械命令带 `AI_CONFIRM=1`）；遇到 M/L、高风险、验证失败、门禁失败任一情况自动停下说明原因；push/MR 仍需人工确认，全部跑完输出总报告。
+
+### 3.5 最大并发子代理（parallel-task，worktree 隔离）
+
+对宿主 agent 说：「读取 `./ai skill parallel-task` 指向的 SKILL.md，**最大并发执行**」。主代理不写码，只做三件事：`./ai ready` 拿可开工清单 → 每个任务派一个子代理（并发开满）→ 子代理完成后 `./ai collect` 回收并管理进度文件。每个子代理独占一个 git worktree（`./ai worktree`），互不踩工作区；门禁在各自 worktree 内跑自己 task 分节的 Validation Command；进度文件冲突由 collect 自动并集合并，业务文件冲突停下走人工。M/L、高风险任务不进并发池，降级 serial-task。
 
 ## 4. 质量门禁（v2 新增，重点）
 
