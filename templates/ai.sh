@@ -160,7 +160,24 @@ cmd_work() {
 # done：质量门禁 + 提交（不 push）
 #   门禁来源：04-acceptance.md 的 `Validation Command:` 行（shell 直判，
 #   允许用 $(...) 表达式）；无命令时退化为只查 acceptance 已有 YES 结论。
+#   提交前同时勾掉 03-tasks.md 的 Progress 复选框——完成状态由机械层回写，
+#   不依赖人工编辑（v1 缺口：done 提交后 next 仍返回同一 task）。
 # ---------------------------------------------------------------------------
+tick_progress() {
+  local tasks_file="$1" task_id="$2" tmp
+  [[ -f "$tasks_file" ]] || return 0
+  tmp="$(mktemp)"
+  awk -v task="$task_id" '
+    /^## Progress/ { in_progress=1 }
+    in_progress && $0 ~ ("^- \\[ \\][[:space:]]+`?" task "`?([[:space:]]|$)") {
+      sub(/^- \[ \]/, "- [x]")
+      in_progress=0
+    }
+    { print }
+  ' "$tasks_file" > "$tmp"
+  mv "$tmp" "$tasks_file"
+}
+
 cmd_done() {
   local spec_id="$1" task_id="$2" tasks_file acc_file gate_script
   tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
@@ -171,6 +188,8 @@ cmd_done() {
 
   gate_script="$(standards_script run_gate.sh)"
   bash "$gate_script" "$spec_id" "$task_id" "$acc_file"
+
+  tick_progress "$tasks_file" "$task_id"
 
   confirm_or_stop "Commit task $task_id (gate passed; will commit locally, not push)"
   local message_file
