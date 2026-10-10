@@ -41,7 +41,8 @@ report_fail() {
   fail_count=$((fail_count + 1))
 }
 
-if [[ ! -d .git ]]; then
+if [[ ! -e .git ]]; then
+  # worktree 内 .git 是文件不是目录（`-e` 而非 `-d`）。
   report_fail "current directory is not a git repository root"
 fi
 
