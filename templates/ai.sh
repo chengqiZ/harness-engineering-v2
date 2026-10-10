@@ -336,9 +336,10 @@ task_complexity() {
 }
 
 task_dependencies() {
+  # 过滤无依赖标记：兼容 `none`/`无`/`(none)`/表格竖线写法（存量 spec 有 | Depends On | 形态）。
   task_field "$1" "$2" "Depends On" | tr ',，' '\n\n' \
-    | sed -E 's/`//g; s/^- //; s/^[[:space:]]+|[[:space:]]+$//g' \
-    | awk 'NF && $0 !~ /^(none|None|NONE|无|N\/A|-|not applicable)$/ { print }'
+    | sed -E 's/`//g; s/^- //; s/^[[:space:]]+|[[:space:]]+$//g; s/^\|//; s/\|$//; s/^[[:space:]]+|[[:space:]]+$//g' \
+    | awk 'NF && $0 !~ /^(none|None|NONE|无|N\/A|-|not applicable|\(none\)|\(None\))$/ { print }'
 }
 
 task_dependencies_met() {
