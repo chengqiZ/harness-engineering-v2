@@ -7,8 +7,15 @@
 ## Validation Commands
 
 <!-- v2：每个 task 至少一条机器可执行判据；`./ai done` 的 run_gate.sh 会逐条执行，全过才放行提交。
-     示例：- Validation Command: `pytest tests/unit -k note_format`
-           - Validation Command: `mvn compile` -->
+     多 task spec 必须按 `### <task-id>` 分节组织（并行模式门禁按分节只跑当前 task 的命令）：
+
+     ### T1
+
+     - Validation Command: `pytest tests/unit -k note_format`
+
+     ### T2
+
+     - Validation Command: `mvn compile` -->
 
 - Validation Command: `<shell command>`
 

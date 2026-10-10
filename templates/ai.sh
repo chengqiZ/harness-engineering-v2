@@ -123,7 +123,9 @@ cmd_next() {
       return 0
     fi
   done
-  fail "no ready task found for spec: $spec_id"
+  # 还有未完成任务却无 ready task 时，最常见的根因是依赖成环/悬空——
+  # check_spec 能点名，提示排查路径而不是让用户对着「no ready task」发呆。
+  fail "no ready task found for spec: $spec_id; if tasks are still open, run: bash .ai-harness/.ai-standards/scripts/check_spec.sh $spec_id (detects dependency cycles and dangling ids)"
 }
 
 # ---------------------------------------------------------------------------

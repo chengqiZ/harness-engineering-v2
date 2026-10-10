@@ -194,6 +194,15 @@ fi
 
 if [[ "$fail_count" -eq 0 ]]; then
   printf 'pass: %s looks ready for review before development\n' "$SPEC_DIR"
+  # 门禁预演清单：显示 ./ai done 将要执行哪些命令，供人工评审 spec 时核对
+  # （信任边界：Validation Command 由 eval 直跑，确认判据可信是评审必查项）。
+  if [[ -f "$SPEC_DIR/04-acceptance.md" ]]; then
+    printf 'gate preview — commands ./ai done will run:\n'
+    grep -E '^- Validation Command:' "$SPEC_DIR/04-acceptance.md" | sed 's/^- /  - /' || true
+    if ! grep -qE '^- Validation Command:' "$SPEC_DIR/04-acceptance.md"; then
+      printf '  (none declared — gate will degrade to YES-decision-only check)\n'
+    fi
+  fi
   exit 0
 fi
 
