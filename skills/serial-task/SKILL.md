@@ -25,8 +25,14 @@ description: "Use when a host agent (Claude Code, Codex, OpenClaw, Gemini CLI, e
 1. `./ai next <spec-id>` 取下一个 ready task（或人工指定 task-id）
 2. `./ai work <spec-id> <task-id>` 切任务分支（脚本会 stash 无关脏区）
 3. 按 task-dev skill 的规则实现 + 验证 + 更新 04-acceptance
-4. `./ai done <spec-id> <task-id>` 跑质量门禁并本地提交
-5. 输出任务闭环摘要；`step-confirm` 模式下暂停等待人工确认，`full-auto` 模式下直接进入下一个 task
+4. `AI_CONFIRM=1 ./ai done <spec-id> <task-id>` 跑质量门禁并本地提交（两种模式都自动提交，不在此处等人）
+5. 输出任务闭环摘要；`step-confirm` 模式下暂停等待人工确认是否继续下一个 task，`full-auto` 模式下直接进入下一个 task
+
+## 评审时机（两种模式一致）
+
+- 提交是机械动作：门禁（Validation Command）过了就本地提交，不需要人工点头——人工评审不放在每个 task 的提交前。
+- push 是唯一的人工闸口：所有 task 完成后（或阶段性收口时），人工审 diff/测试证据/风险/回滚，通过 `./ai pr` 推送（自带确认门）。
+- `step-confirm` 与 `full-auto` 的唯一差别是「每个 task 闭环后是否暂停等确认继续」，不是评审位置。
 
 ## full-auto 模式
 

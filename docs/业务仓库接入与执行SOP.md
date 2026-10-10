@@ -137,11 +137,11 @@ bash /path/to/harness-engineering-v2/scripts/init_business_repo.sh <repo-url-of-
 ### 5. 门禁 + 提交
 
 ```bash
-./ai done <spec-id> <task-id>
+AI_CONFIRM=1 ./ai done <spec-id> <task-id>
 ```
 
-- run_gate.sh 逐条执行 Validation Command，全过才本地提交。
-- 人工评审 agent 的产出（diff、测试证据、注释、风险、回滚）后再放行提交。
+- run_gate.sh 逐条执行 Validation Command，全过才本地提交（提交是机械动作，不设逐 task 人工评审）。
+- 人工评审统一放在 push 前：审 diff、测试证据、注释、风险、回滚后，再执行 `./ai pr` 推送（自带确认门）。
 
 ### 6. 准备 PR 和验收
 

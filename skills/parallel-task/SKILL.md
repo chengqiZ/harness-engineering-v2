@@ -49,7 +49,7 @@ worktree 落在 `.ai-harness/worktrees/<spec>-<task>`（可用 `AI_HARNESS_WT_DI
 5. 子代理陆续完成后（每次回收一个）：
    - `./ai collect <spec-id> <task-id>`；冲突时停下报告，不自动解决。
    - 回收后重跑 `./ai ready`——新 task 的依赖可能刚被解锁，继续派发。
-6. 所有 task 完成后：汇总每个 task 的 task-id、验证证据、diffstat，输出总报告（含 risks、rollback、pending items），等人工评审。
+6. 所有 task 完成后：汇总每个 task 的 task-id、验证证据、diffstat，输出总报告（含 risks、rollback、pending items）；人工评审统一在 push 前（`./ai pr` 确认门），不是逐 task 评审。
 
 # 派发纪律
 
