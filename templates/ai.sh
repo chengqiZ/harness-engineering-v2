@@ -11,10 +11,12 @@ HARNESS_DIR=".ai-harness"
 STANDARDS_DIR="$HARNESS_DIR/.ai-standards"
 
 # 允许从任意子目录调用：定位业务仓库根再 cd 过去。
+# 注意 `-e` 而非 `-d`：git worktree 里 .git 是文件不是目录（并行模式子代理在
+# worktree 内运行 ./ai 依赖这一点）。
 repo_root() {
   local dir="$PWD"
   while [[ "$dir" != "/" ]]; do
-    [[ -d "$dir/.git" ]] && { cd "$dir"; return 0; }
+    [[ -e "$dir/.git" ]] && { cd "$dir"; return 0; }
     dir="$(dirname "$dir")"
   done
   return 1
@@ -37,7 +39,10 @@ usage:
   ./ai status                          # 仓库/规范源/spec 概览
   ./ai spec <spec-id> [source-doc]     # 初始化 spec 四件套并做占位检查
   ./ai next <spec-id>                  # 输出下一个可执行 task（S→M→L 优先）
+  ./ai ready <spec-id>                 # 并行模式：列出所有可同时开工的 task
   ./ai work <spec-id> <task-id>        # 切到任务分支（脏区自动 stash）
+  ./ai worktree <spec-id> <task-id>    # 并行模式：为 task 创建隔离 worktree（子代理入口）
+  ./ai collect <spec-id> <task-id>     # 并行模式：回收 task 分支并勾进度（主代理专用）
   ./ai done <spec-id> <task-id>        # 运行 04-acceptance 声明的验证命令并提交
   ./ai run <spec-id> [source-doc]      # spec → next → work → done 一键串行
   ./ai resume <spec-id>                # 从 03-tasks.md 的 Run Checkpoint 恢复
@@ -381,6 +386,130 @@ task_next_ready() {
   return 1
 }
 
+task_next_ready_all() {
+  # 并行模式用：输出全部依赖满足且未完成的 task（不按复杂度过滤）。
+  local tasks_file="$1" task_id
+  while IFS= read -r task_id; do
+    task_done "$tasks_file" "$task_id" && continue
+    task_dependencies_met "$tasks_file" "$task_id" && printf '%s\n' "$task_id"
+  done < <(task_ids "$tasks_file")
+}
+
+task_in_flight() {
+  # 03-tasks.md Run Checkpoint 区是否记录了 in-flight 任务（并行模式互斥标记）。
+  local tasks_file="$1" task_id="$2"
+  awk -v task="$task_id" '
+    /^## Run Checkpoint/ { in_ckpt=1 }
+    in_ckpt && $0 ~ ("^- In-Flight: `?" task "`?([[:space:]]|$)") { print "yes"; exit }
+  ' "$tasks_file" | grep -q yes
+}
+
+# ---------------------------------------------------------------------------
+# 并行模式：主代理派活 / 子代理隔离执行 / 主代理回收（v2.1 新增）
+#
+# 角色分工：主代理不写码——只负责 ①./ai ready 拿可开工清单 ②把 task 派给
+# 最大数量的并发子代理 ③管理进度文件（in-flight 标记、Progress 勾选）。
+# 子代理各占一个 git worktree，互不踩工作区；产出由 ./ai collect 合回。
+# ---------------------------------------------------------------------------
+WT_DIR="${AI_HARNESS_WT_DIR:-$PWD/.ai-harness/worktrees}"
+
+mark_in_flight() {
+  # 并行互斥：把已派发的 task 记进 03-tasks.md Run Checkpoint 区。
+  # 多个主代理并发调用时靠此标记防止重复派发（awk 重写整文件，后写覆盖前写，
+  # 偶发竞态由 worktree 分支名唯一兜底：同一 task 只有一个 feat/<spec>-<task> 分支）。
+  local tasks_file="$1" spec_id="$2" task_id="$3" tmp
+  [[ -f "$tasks_file" ]] || return 0
+  tmp="$(mktemp)"
+  awk -v task="$task_id" '
+    { print }
+    /^## Run Checkpoint/ && !seen {
+      print ""
+      print "- In-Flight: `" task "`"
+      seen=1
+    }
+  ' "$tasks_file" > "$tmp"
+  mv "$tmp" "$tasks_file"
+}
+
+clear_in_flight() {
+  local tasks_file="$1" task_id="$2" tmp
+  [[ -f "$tasks_file" ]] || return 0
+  tmp="$(mktemp)"
+  awk -v task="$task_id" '
+    $0 ~ ("^- In-Flight: `?" task "`?([[:space:]]|$)") { next }
+    { print }
+  ' "$tasks_file" > "$tmp"
+  mv "$tmp" "$tasks_file"
+}
+
+# ---------------------------------------------------------------------------
+# ready：并行模式主代理专用——列出当前所有可同时开工的 task。
+# ---------------------------------------------------------------------------
+cmd_ready() {
+  local spec_id="$1" tasks_file task_id
+  tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
+  [[ -f "$tasks_file" ]] || fail "missing $tasks_file"
+  while IFS= read -r task_id; do
+    printf '%s %s\n' "$task_id" "$(task_complexity "$tasks_file" "$task_id")"
+  done < <(task_next_ready_all "$tasks_file")
+}
+
+# ---------------------------------------------------------------------------
+# worktree：并行模式子代理专用——为 task 创建隔离工作区。
+#   子代理在 worktree 内照常 ./ai work → task-dev skill → ./ai done 闭环；
+#   提交落在 feat/<spec>-<task> 分支，由主代理 ./ai collect 回收。
+# ---------------------------------------------------------------------------
+cmd_worktree() {
+  local spec_id="$1" task_id="$2"
+  local tasks_file wt_path branch
+  tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
+  [[ -f "$tasks_file" ]] || fail "missing $tasks_file"
+  # 与 ./ai work 相同的前置门禁：占位 spec 不许开发、依赖须完成；
+  # 并行互斥：已完成或 in-flight 的 task 拒绝重复领取。
+  bash "$(standards_script check_spec.sh)" "$spec_id" >/dev/null 2>&1 \
+    || fail "spec $spec_id not ready: run bash $(standards_script check_spec.sh) $spec_id and fix the listed issues first"
+  task_exists "$tasks_file" "$task_id" || fail "task id not found: $task_id"
+  task_done "$tasks_file" "$task_id" && fail "task already marked done: $task_id"
+  task_in_flight "$tasks_file" "$task_id" && fail "task already claimed by another agent: $task_id"
+  task_dependencies_met "$tasks_file" "$task_id" || fail "dependencies are not complete for task: $task_id"
+
+  branch="feat/$spec_id-$task_id"
+  wt_path="$WT_DIR/${spec_id}-${task_id}"
+  if [[ -d "$wt_path" ]]; then
+    say "worktree exists: $wt_path"
+  else
+    git worktree add -b "$branch" "$wt_path" 2>/dev/null \
+      || fail "cannot create worktree for $branch (branch or worktree already exists?)"
+  fi
+  mark_in_flight "$tasks_file" "$spec_id" "$task_id"
+  say "worktree: $wt_path"
+  say "branch: $branch"
+  say "next: cd $wt_path && ./ai work $spec_id $task_id"
+}
+
+# ---------------------------------------------------------------------------
+# collect：并行模式主代理专用——回收子代理的 task 分支。
+#   合回当前分支、勾进度、清 in-flight 标记、删 worktree 与分支。
+#   冲突时不落地、直接报错退出，不自动解决冲突。
+# ---------------------------------------------------------------------------
+cmd_collect() {
+  local spec_id="$1" task_id="$2"
+  local tasks_file branch
+  tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
+  [[ -f "$tasks_file" ]] || fail "missing $tasks_file"
+  branch="feat/$spec_id-$task_id"
+  git show-ref --verify --quiet "refs/heads/$branch" \
+    || fail "branch not found: $branch (did the sub-agent run ./ai done?)"
+  git merge --no-ff --no-edit -m "chore(${spec_id}): collect parallel task ${task_id}" "$branch" 2>/dev/null \
+    || { git merge --abort 2>/dev/null || true; fail "merge conflict collecting $branch; resolve manually"; }
+  tick_progress "$tasks_file" "$task_id"
+  clear_in_flight "$tasks_file" "$task_id"
+  git worktree remove --force "$WT_DIR/${spec_id}-${task_id}" 2>/dev/null || true
+  git branch -D "$branch" 2>/dev/null || true
+  say "collected: $task_id -> $(git symbolic-ref --short HEAD)"
+  say "worktree removed; branch deleted"
+}
+
 # ---------------------------------------------------------------------------
 main() {
   local cmd="${1:-}"
@@ -389,7 +518,10 @@ main() {
     status) cmd_status ;;
     spec)   [[ $# -ge 1 ]] || { usage; exit 1; }; cmd_spec "$@" ;;
     next)   [[ $# -eq 1 ]] || { usage; exit 1; }; cmd_next "$1" ;;
+    ready)  [[ $# -eq 1 ]] || { usage; exit 1; }; cmd_ready "$1" ;;
     work)   [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_work "$1" "$2" ;;
+    worktree) [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_worktree "$1" "$2" ;;
+    collect) [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_collect "$1" "$2" ;;
     done)   [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_done "$1" "$2" ;;
     pr)     [[ $# -ge 2 && $# -le 3 ]] || { usage; exit 1; }; cmd_pr "$@" ;;
     run)    [[ $# -ge 1 ]] || { usage; exit 1; }; cmd_run "$@" ;;
