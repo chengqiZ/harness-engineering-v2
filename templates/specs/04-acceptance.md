@@ -4,6 +4,14 @@
 
 - `<spec-id>`
 
+## Validation Commands
+
+<!-- v2：每个 task 至少一条机器可执行判据；`./ai done` 的 run_gate.sh 会逐条执行，全过才放行提交。
+     示例：- Validation Command: `pytest tests/unit -k note_format`
+           - Validation Command: `mvn compile` -->
+
+- Validation Command: `<shell command>`
+
 ## Functional Acceptance
 
 - [ ] Requirement A verified

@@ -1,12 +1,13 @@
-# AI Coding Harness 操作指导手册（Submodule 版）
+# AI Coding Harness 操作指导手册 v2
 
 ## 1. 使用前提
 
 - 当前仓库是规范源仓库，用于维护统一规则、模板、示例和 SOP。
-- 你有一个规范源仓库：`ai-coding-standards`
+- 你有一个规范源仓库：`harness-engineering-v2`（本仓库）
 - 业务仓库通过 submodule 引入到：`/.ai-harness/.ai-standards`
 - 业务仓库的规范相关内容统一放在：`/.ai-harness/`
 - `/.ai-harness/AGENTS.md` 只放项目特例
+- 你有一个具备仓库读写能力的宿主 agent（Claude Code、Codex、OpenClaw、Gemini CLI、Copilot CLI 或内部 AI 程序）
 
 建议先阅读：
 - 主方案：`AI_CODING_HARNESS_完整方案.md`
@@ -18,7 +19,7 @@
 推荐从业务仓库根目录执行：
 
 ```bash
-bash /path/to/ai-coding-standards/scripts/init_business_repo.sh <repo-url-of-ai-coding-standards>
+bash /path/to/harness-engineering-v2/scripts/init_business_repo.sh <repo-url-of-harness-engineering-v2>
 ```
 
 该命令会添加 submodule、执行 bootstrap，并运行 `./ai status`。
@@ -26,7 +27,7 @@ bash /path/to/ai-coding-standards/scripts/init_business_repo.sh <repo-url-of-ai-
 手工等价步骤用于排错或受限环境：
 
 ```bash
-git submodule add <repo-url-of-ai-coding-standards> .ai-harness/.ai-standards
+git submodule add <repo-url-of-harness-engineering-v2> .ai-harness/.ai-standards
 git submodule update --init --recursive
 bash .ai-harness/.ai-standards/scripts/bootstrap_repo.sh
 git add .gitmodules .ai-harness .github
@@ -43,260 +44,70 @@ git commit -m "chore(harness): setup ai coding harness"
 ./ai status
 ```
 
-## 3. 日常自动化流程
+## 3. 日常流程：机械层 + 宿主 agent 配合
 
-业务仓库根目录提供单一入口 `./ai`：
+v2 的分工：`./ai` 只做机械操作（骨架、检查、分支、提交、门禁）；AI 参与的工作由宿主 agent 加载 skills 执行。任何宿主 agent 都用同一套流程，没有 Codex 特权路径。
 
 ```bash
-./ai status
-./ai spec <spec-id> <source-doc>
-./ai next <spec-id>
-./ai work <spec-id> <task-id>
-./ai pr <spec-id> <task-id> [target-branch]
+./ai status                          # 仓库/规范源/spec 概览
+./ai spec <spec-id> <source-doc>     # 骨架 + 占位检查 + 拷入需求文档
+./ai next <spec-id>                  # 下一个 ready task
+./ai work <spec-id> <task-id>        # 切任务分支（脏区自动 stash）
+./ai done <spec-id> <task-id>        # 跑验收门禁 + 本地提交
+./ai pr <spec-id> <task-id> main     # 生成 MR 材料 + 推送（有人工确认门）
+./ai run <spec-id> <source-doc>      # spec→next→work→done 一键串行
+./ai resume <spec-id>                # 从 Run Checkpoint 恢复
+./ai skill <name>                    # 打印 SKILL.md 路径
+```
+
+skills 一览（宿主 agent 按需加载）：
+- `spec-prep`：需求文档 → spec 四件套（要求为每个 task 写 Validation Command）
+- `task-dev`：单 task 开发 + 验证 + acceptance 更新
+- `pr-prep`：MR 材料生成
+- `serial-task`：宿主 agent 串行多 task 执行（含硬性暂停条件）
+
+### 3.1 标准路径（每个需求的完整走法）
+
+1. `./ai spec <spec-id> <source-doc>`
+2. 对宿主 agent 说：「读取 `./ai skill spec-prep` 指向的 SKILL.md，补齐 spec 四件套」→ 人工确认 spec 和推荐 task
+3. `./ai work <spec-id> <task-id>`
+4. 对宿主 agent 说：「读取 `./ai skill task-dev` 指向的 SKILL.md，执行该 task」→ agent 实现、跑验证命令、更新 04-acceptance
+5. `./ai done <spec-id> <task-id>` → 门禁全过 + 本地提交
+6. 对宿主 agent 说：「读取 `./ai skill pr-prep` 指向的 SKILL.md，生成 MR 描述」
+7. `./ai pr <spec-id> <task-id> main` → 推送 + MR 材料文件
+8. 平台建 MR、评审、合并；合并后按 `templates/changelog-entry.md` 写 changelog
+
+### 3.2 一键路径（低风险 S 级）
+
+```bash
 ./ai run <spec-id> <source-doc>
 ```
 
-推荐日常用法：
-
-1. 从需求文档生成 spec 并自动推进首个 `S` 任务：
+失败后：
 
 ```bash
-./ai run <spec-id> <source-doc>
+./ai resume <spec-id>
 ```
 
-2. 已有 spec 时，查看下一个可执行任务：
+按输出的 Resume Command 继续（如 `./ai work <spec-id> <task-id>`）。
 
-```bash
-./ai next <spec-id>
-```
+### 3.3 多 task 串行（宿主 agent 驱动）
 
-3. 只执行一个任务：
+对宿主 agent 说：「读取 `./ai skill serial-task` 指向的 SKILL.md，按 03-tasks.md 依赖顺序串行执行」。agent 会在每个 task 闭环后暂停；M/L、高风险、验证失败、规则冲突等场景强制暂停（见 SKILL.md 的暂停条件）。
 
-```bash
-./ai work <spec-id> <task-id>
-```
+## 4. 质量门禁（v2 新增，重点）
 
-4. 任务完成后整理 MR 材料、提交并推送：
+- spec 阶段（spec-prep skill）就要求为每个 task 写 `- Validation Command:` 行到 `04-acceptance.md`，内容是 shell 可执行命令，如 `pytest tests/unit -k note_format`、`mvn compile`。
+- `./ai done <spec-id> <task-id>` 会调 `run_gate.sh` 逐条执行这些命令；任何一条失败即拒绝提交并打印输出尾部。
+- 没有任何 Validation Command 时门禁退化为：`Final Decision` 必须已写 YES。这只是兜底，不是常态——新 spec 必须有机器判据。
+- 修 bug 的回归测试、行为变化的测试更新同样走这个门禁（命令里体现）。
 
-```bash
-./ai pr <spec-id> <task-id> main
-```
+## 5. 高级/排错流程：逐脚本使用
 
-自动化边界：
-- `S` 任务可在 spec 检查通过后自动进入开发。
-- `M/L`、Open Questions、DB/auth/权限/billing/风险逻辑相关任务会暂停并要求人工确认。
-- `./ai work` 开始前会把已有脏工作区保存成 named stash，输出恢复提示；当前 spec 文件如有未提交修改会保留在工作区作为任务上下文。
-- `./ai pr` 提交和推送前必须暂停，展示 diff 摘要、测试证据、风险、回滚方案、commit message 和 MR 描述。
-- v1 不调用 GitLab API 创建 MR，只生成可粘贴的 MR 材料。
-
-## 3.1 其他 AI 程序执行流程
-
-如果使用 Claude Code、OpenClaw、Gemini CLI、Copilot CLI 或内部 AI 程序执行业务仓库任务，不要让这些工具调用 `./ai run`、`./ai spec`、`./ai work`、`./ai pr`。这些命令是 Codex 调度入口，会再次调用 Codex。
-
-其他具备仓库读写能力的 AI 程序使用：
-
-```text
-.ai-harness/.ai-standards/templates/prompts/serial-task-pipeline.md
-```
-
-执行模式：
-
-```text
-Execution Mode: portable-managed
-```
-
-使用方式：
-
-1. 在业务仓库根目录打开对应 AI 工具。
-2. 要求 AI 读取 `serial-task-pipeline.md`。
-3. 提供模板输入：
-   - `Spec ID`
-   - `Source document`，如果 spec 已存在可留空或说明“继续当前 spec”
-   - `Target branch`
-4. AI 先完成 `Startup Checks`。
-5. 如果 spec 不完整，先创建或完善 spec 四件套，不写业务代码。
-6. 如果 spec 已可执行，按 `03-tasks.md` 依赖顺序一次执行一个 `task-id`。
-7. 每个 `task-id` 完成后必须暂停，输出测试证据、风险、回滚方案、PR 材料和 next ready task，等待人工确认是否继续。
-
-**也可以先从业务仓库根目录生成已替换占位符的提示词**，再复制给其他 AI 程序：
-
-```bash
-bash .ai-harness/.ai-standards/scripts/prepare_serial_task_prompt.sh <spec-id> [source-doc] [target-branch]
-```
-
-`target-branch` 可省略，默认使用当前所在 git 分支。`source-doc` 是普通业务需求文档，可以是 PRD、方案说明、缺陷描述、验收口径或用户故事；如果 spec 已存在，也可以省略 `source-doc`，让 AI 继续当前 spec。
-
-可复制启动语：
-
-```text
-请读取并使用 .ai-harness/.ai-standards/templates/prompts/serial-task-pipeline.md。
-
-模板输入：
-- Spec ID: <spec-id>
-- Source document: <source-doc 或留空>
-- Target branch: <target-branch 或当前所在分支>
-
-Execution Mode 使用 portable-managed。
-不要执行 ./ai run、./ai spec、./ai work、./ai pr。
-请先完成 Startup Checks，然后按当前 spec 的 03-tasks.md 依赖顺序串行执行 task。
-每完成一个 task-id 后暂停，输出验证证据、风险、回滚方案、PR 材料和 next ready task，等待我确认是否继续。
-```
-
-## 4. 高级/排错流程：逐脚本使用
-
-1. 运行 `bash .ai-harness/.ai-standards/scripts/init_spec.sh <spec-id>`
-2. 运行 `bash .ai-harness/.ai-standards/scripts/prepare_spec_prompt.sh <spec-id> <source-doc>`
-3. 将输出提示词交给 AI，基于需求文档或方案文档补齐 4 个文件：
-- `01-requirements.md`
-- `02-design.md`
-- `03-tasks.md`
-- `04-acceptance.md`
-4. 你确认 spec、Open Questions 和推荐 task
-5. 运行 `bash .ai-harness/.ai-standards/scripts/check_spec.sh <spec-id>`
-6. AI 先拆任务，后开发
-7. 一次只做一个 `task-id`
-8. 每次提交附验证证据
-
-## 4.1 规范源库维护记录
-
-当前仓库维护自身 standards、docs、templates 时，不在顶层 `specs/` 下沉淀每次维护任务。业务仓库 spec 骨架只保留在 `templates/specs/`。
-
-源库维护事项通过以下资料留痕：
-
-- `docs/TODO.md`
-- 决策记录或 SOP 更新
-- changelog 说明
-- PR/report 中的验证证据
-
-业务仓库执行产物仍使用 `.ai-harness/specs/<spec-id>/` 四件套。
-
-## 5. 可直接复制的提示词（重点）
-
-默认要求：后续文档、模板、SOP、报告和 AI 回复以中文为主；命令、路径、代码标识符、协议字段、错误码、commit/PR 固定格式可保留原文。
-
-### 5.1 通用启动提示词（每个需求第一条）
-
-```text
-请按以下优先级读取并遵循规范：
-1) 当前会话约束
-2) .ai-harness/AGENTS.md
-3) .ai-harness/.ai-standards/AGENTS.md
-4) .ai-harness/.ai-standards/standards/*.md
-
-如果规则冲突，请在输出中明确：
-- 冲突点
-- 采用的规则来源
-- 理由
-
-后续回复、文档和报告默认使用中文；命令、路径、代码标识符、协议字段、错误码、commit/PR 固定格式可保留原文。
-
-先不要写代码，先审阅 .ai-harness/specs/<spec-id>/01-requirements.md 并输出缺失项与歧义问题清单。
-```
-
-### 5.2 需求澄清提示词
-
-```text
-基于 .ai-harness/specs/<spec-id>/01-requirements.md，
-请输出：
-1) 缺失信息（按高/中/低优先级）
-2) 歧义点
-3) 可执行的补充建议
-要求：仅输出可落地结论，不输出泛化建议。
-```
-
-### 5.3 任务拆解提示词
-
-```text
-请基于 .ai-harness/specs/<spec-id>/01-requirements.md 和 .ai-harness/.ai-standards 规范生成 .ai-harness/specs/<spec-id>/03-tasks.md。
-要求：
-1) 每个任务必须包含 Task ID/Purpose/Inputs/Changes/Validation/Done
-2) 标注任务依赖关系
-3) 每个任务可在一个PR内完成
-4) 标记任务复杂度 S/M/L，并说明原因
-```
-
-### 5.4 设计文档提示词（Vue + Java + MySQL）
-
-```text
-请生成 .ai-harness/specs/<spec-id>/02-design.md，遵循 .ai-harness/.ai-standards/standards/*：
-1) 前端：页面状态、交互流、错误态、Pinia/store与service边界
-2) 后端：controller/service/repository 分层、DTO、异常模型
-3) 数据库：MySQL表结构变更、索引策略、迁移与回滚方案
-4) API：请求响应契约、错误码、兼容策略
-```
-
-### 5.5 单任务开发提示词
-
-```text
-现在只实现 .ai-harness/specs/<spec-id>/03-tasks.md 中的 <task-id>。
-严格遵循：
-- .ai-harness/AGENTS.md
-- .ai-harness/.ai-standards/AGENTS.md
-- .ai-harness/.ai-standards/standards/*.md
-
-执行步骤：
-1) 先输出文件级修改计划（不要改代码）
-2) 再实现代码（仅限该 task-id）
-3) 输出测试命令与结果
-4) 输出风险与回滚方案
-
-限制：
-- 不做额外重构
-- 不触碰无关模块
-- 若需要突破限制，先说明并等待确认
-```
-
-### 5.6 代码评审提示词
-
-```text
-请按“高风险优先”评审本次改动，基于 .ai-harness/.ai-standards 规范输出：
-1) 严重问题（必须修复）
-2) 潜在回归风险
-3) 缺失测试
-4) API/数据库兼容性问题
-5) 可选优化项
-
-每条问题给出：
-- 影响
-- 证据（文件/逻辑点）
-- 修复建议
-```
-
-### 5.7 PR 说明生成提示词
-
-```text
-请为 <task-id> 生成 PR 描述，必须包含：
-1) Spec 链接
-2) Task ID
-3) 变更文件清单
-4) 测试命令与结果
-5) 风险
-6) 回滚方案
-7) Exception/Reason/Scope/Expiry（如有例外）
-```
-
-### 5.8 发布前验收提示词
-
-```text
-请按 .ai-harness/specs/<spec-id>/04-acceptance.md 与 .ai-harness/.ai-standards/standards/testing.md 规范做最终验收。
-输出：
-1) 通过项
-2) 不通过项
-3) 阻塞项
-4) 是否允许合并（YES/NO）
-并给出依据。
-```
-
-### 5.9 规范升级提示词（子模块版本升级后）
-
-```text
-当前项目已将 .ai-harness/.ai-standards 升级到 <tag-or-sha>。
-请扫描本仓库并输出：
-1) 新规范可能影响的流程点
-2) 需要调整的项目特例（AGENTS.md）
-3) 可能导致失败的测试或门禁
-4) 建议的修复顺序（P0/P1/P2）
-```
+1. `bash .ai-harness/.ai-standards/scripts/init_spec.sh <spec-id>` 创建四件套骨架
+2. 宿主 agent 走 spec-prep skill 补齐
+3. `bash .ai-harness/.ai-standards/scripts/check_spec.sh <spec-id>` 检查占位残留
+4. `bash .ai-harness/.ai-standards/scripts/run_gate.sh <spec-id> <task-id> .ai-harness/specs/<spec-id>/04-acceptance.md` 单独跑门禁排错
 
 ## 6. 子模块升级操作
 
@@ -317,24 +128,111 @@ git add .ai-harness .github ai
 git commit -m "chore(standards): upgrade ai coding standards"
 ```
 
-手工等价步骤用于排错或受限环境：
+升级后让宿主 agent 执行「规范升级评估」：读取 `templates/standards-upgrade-review.md`，输出新规范可能影响的流程点、需要调整的项目特例、可能导致失败的测试、修复顺序（P0/P1/P2）。
 
-```bash
-git submodule update --remote .ai-harness/.ai-standards
-cd .ai-harness/.ai-standards && git checkout <tag-or-sha> && cd ../..
-git add .ai-harness/.ai-standards
-git commit -m "chore(standards): upgrade .ai-harness/.ai-standards to <tag-or-sha>"
+## 7. 规范源库维护记录
+
+当前仓库维护自身 standards、docs、templates 时，不在顶层 `specs/` 下沉淀每次维护任务。业务仓库 spec 骨架只保留在 `templates/specs/`。
+
+源库维护事项通过以下资料留痕：
+- `docs/TODO.md`
+- 决策记录或 SOP 更新
+- changelog 说明
+- PR/report 中的验证证据
+
+业务仓库执行产物仍使用 `.ai-harness/specs/<spec-id>/` 四件套。
+
+## 8. 可直接复制的启动提示词
+
+默认要求：后续文档、模板、SOP、报告和 AI 回复以中文为主；命令、路径、代码标识符、协议字段、错误码、commit/PR 固定格式可保留原文。
+
+### 8.1 通用启动提示词（每个需求第一条）
+
+```text
+请按以下优先级读取并遵循规范：
+1) 当前会话约束
+2) .ai-harness/AGENTS.md
+3) .ai-harness/.ai-standards/AGENTS.md
+4) .ai-harness/.ai-standards/standards/*.md
+
+如果规则冲突，请在输出中明确：冲突点、采用的规则来源、理由。
+
+后续回复、文档和报告默认使用中文；命令、路径、代码标识符、协议字段、错误码、commit/PR 固定格式可保留原文。
+
+先不要写代码，先读取 ./ai skill spec-prep 指向的 SKILL.md，
+然后审阅 .ai-harness/specs/<spec-id>/01-requirements.md 并输出缺失项与歧义问题清单。
 ```
 
-升级后必须执行：
-- 运行“规范升级提示词”
-- 提交升级影响评估
+### 8.2 需求澄清提示词
 
-## 7. 常见问题
+```text
+基于 .ai-harness/specs/<spec-id>/01-requirements.md，
+请输出：
+1) 缺失信息（按高/中/低优先级）
+2) 歧义点
+3) 可执行的补充建议
+要求：仅输出可落地结论，不输出泛化建议。
+```
 
-### Q1：AI 没有读取子模块规范怎么办？
-- 在第一条提示词里明确列出规范读取顺序（见 5.1）。
-- 要求 AI 先“复述已读取的规范来源”。
+### 8.3 单任务开发提示词
+
+```text
+请读取 ./ai skill task-dev 指向的 SKILL.md，
+只实现 .ai-harness/specs/<spec-id>/03-tasks.md 中的 <task-id>。
+完成后运行该 task 的 Validation Command 并更新 04-acceptance.md，
+然后停止等我评审；不要自行调用 ./ai done。
+```
+
+### 8.4 代码评审提示词
+
+```text
+请按“高风险优先”评审本次改动，基于 .ai-harness/.ai-standards 规范输出：
+1) 严重问题（必须修复）
+2) 潜在回归风险
+3) 缺失测试
+4) API/数据库兼容性问题
+5) 可选优化项
+
+每条问题给出：影响、证据（文件/逻辑点）、修复建议。
+```
+
+### 8.5 PR 说明生成提示词
+
+```text
+请读取 ./ai skill pr-prep 指向的 SKILL.md，
+为 <task-id> 生成 MR 描述，必须包含：
+1) Spec 链接
+2) Task ID
+3) 变更文件清单
+4) 测试命令与结果
+5) 风险
+6) 回滚方案
+7) Exception/Reason/Scope/Expiry（如有例外）
+```
+
+### 8.6 发布前验收提示词
+
+```text
+请按 .ai-harness/specs/<spec-id>/04-acceptance.md 与 .ai-harness/.ai-standards/standards/testing.md 规范做最终验收。
+输出：通过项、不通过项、阻塞项、是否允许合并（YES/NO），并给出依据。
+```
+
+### 8.7 规范升级提示词（子模块版本升级后）
+
+```text
+当前项目已将 .ai-harness/.ai-standards 升级到 <tag-or-sha>。
+请按 .ai-harness/.ai-standards/templates/standards-upgrade-review.md 扫描本仓库并输出：
+1) 新规范可能影响的流程点
+2) 需要调整的项目特例（AGENTS.md）
+3) 可能导致失败的测试或门禁
+4) 建议的修复顺序（P0/P1/P2）
+```
+
+## 9. 常见问题
+
+### Q1：宿主 agent 没有读取子模块规范怎么办？
+- 在第一条提示词里明确列出规范读取顺序（见 8.1）。
+- 要求 agent 先「复述已读取的规范来源」。
 
 ### Q2：项目需要例外规则怎么办？
 - 写在 `/.ai-harness/AGENTS.md`，并加 `Reason/Scope/Expiry`。
@@ -342,32 +240,25 @@ git commit -m "chore(standards): upgrade .ai-harness/.ai-standards to <tag-or-sh
 ### Q3：规范升级后有回归怎么办？
 - 回退 `.ai-harness/.ai-standards` 到上一个稳定 tag/SHA，单独提 PR。
 
-## 8. 日常最短使用法（3条）
+### Q4：门禁命令在本机跑不了（环境缺依赖）怎么办？
+- 把阻塞原因写进 `04-acceptance.md` 的 Testing Evidence 段，人工评审决定是否放行；门禁本身不做静默跳过。
 
-1. 自动化优先：`./ai run <spec-id> <source-doc>`
-2. 单任务开发：`./ai work <spec-id> <task-id>`
-3. 合并前整理：`./ai pr <spec-id> <task-id> main`
+## 10. 日常最短使用法（3 条）
 
-如果已有需求文档或方案文档，先运行：
+1. 新需求：`./ai spec <spec-id> <source-doc>` + 「读取 spec-prep skill 补齐四件套」
+2. 单任务：`./ai work <spec-id> <task-id>` + 「读取 task-dev skill 执行」+ `./ai done <spec-id> <task-id>`
+3. 合并前：`./ai pr <spec-id> <task-id> main`
 
-```bash
-bash .ai-harness/.ai-standards/scripts/prepare_spec_prompt.sh <spec-id> <source-doc>
-```
-
-再把输出提示词交给 AI 补齐 spec。
-
-## 9. 规范源仓库维护者补充动作
+## 11. 规范源仓库维护者补充动作
 
 当你维护当前规范源仓库时，建议同步维护以下资料：
-- `templates/*.md`
-- `templates/specs/`
-- `docs/业务仓库接入与执行SOP.md`
-- `docs/changelog/README.md`
-- `scripts/*.sh`
-- `scripts/README.md`
-- `templates/prompts/*.md`
+- `templates/*.md`、`templates/specs/`
+- `skills/*/SKILL.md`
+- `docs/业务仓库接入与执行SOP.md`、`docs/changelog/README.md`
+- `scripts/*.sh`、`scripts/README.md`
 
 当规范升级时，除更新规则本身外，也应检查：
 - 模板是否需要同步补字段
 - 示例是否仍符合当前规则
 - SOP 是否仍适配当前推荐流程
+- SKILL.md 的阶段边界是否仍与 `./ai` 子命令对齐

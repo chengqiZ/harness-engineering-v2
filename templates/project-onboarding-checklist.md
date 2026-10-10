@@ -18,13 +18,14 @@
 - [ ] `01-requirements.md` copied from template
 - [ ] `02-design.md` copied when task sizing requires it
 - [ ] `03-tasks.md` copied and filled with task schema
-- [ ] `04-acceptance.md` copied and ready for final check
+- [ ] `04-acceptance.md` copied and ready for final check（v2：含 `Validation Command:` 声明位）
 - [ ] PR template configured in repo
 - [ ] Changelog template available to contributors
 
 ## Validation Readiness
 
 - [ ] Test command baseline documented
+- [ ] `Validation Command` 示例可在本机环境真实跑通（`./ai done` 门禁依赖它）
 - [ ] Manual verification path documented for non-runnable cases
 - [ ] Rollback owner identified for high-risk changes
 

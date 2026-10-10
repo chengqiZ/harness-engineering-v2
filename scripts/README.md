@@ -1,44 +1,39 @@
 # Scripts
 
-这些脚本用于在业务仓库中快速接入 AI Coding Harness。日常使用优先走业务仓库根目录的 `./ai` 单入口，底层脚本保留为排错和高级入口。
+这些脚本用于在业务仓库中快速接入 AI Coding Harness v2。
+
+v2 分工：`./ai` 只做机械操作（骨架、检查、分支、提交、门禁）；AI 参与的工作（写 spec、写代码、写 MR 材料）由宿主 agent 加载 `skills/` 下的 SKILL.md 执行。脚本不再调度任何 AI 程序，任何宿主 agent（Claude Code、Codex、OpenClaw、Gemini CLI 等）走同一套流程。
 
 ## Daily Entry
 
 初始化后，在业务仓库根目录使用：
 
 ```bash
-./ai status
-./ai spec <spec-id> <source-doc>
-./ai next <spec-id>
-./ai work <spec-id> <task-id>
-./ai pr <spec-id> <task-id> [target-branch]
-./ai run <spec-id> <source-doc>
+./ai status                          # 仓库/规范源/spec 概览
+./ai spec <spec-id> [source-doc]     # 初始化 spec 四件套并做占位检查
+./ai next <spec-id>                  # 输出下一个可执行 task（S→M→L 优先）
+./ai work <spec-id> <task-id>        # 切到任务分支（脏区自动 stash）
+./ai done <spec-id> <task-id>        # 运行 04-acceptance 的 Validation Command 并本地提交
+./ai run <spec-id> [source-doc]      # spec → next → work → done 一键串行
+./ai resume <spec-id>                # 从 03-tasks.md 的 Run Checkpoint 恢复
+./ai skill <name>                    # 打印 SKILL.md 路径（spec-prep/task-dev/pr-prep/serial-task）
+./ai pr <spec-id> <task-id> [target] # 生成 MR 材料文件并提交推送（有人工确认门）
 ```
 
 推荐日常路径：
 
-- 新需求一键推进到首个可执行任务：`./ai run <spec-id> <source-doc>`
-- 已有 spec，只执行一个任务：`./ai work <spec-id> <task-id>`
-- 任务完成后生成 MR 材料并提交推送：`./ai pr <spec-id> <task-id> main`
+- 新需求：`./ai spec <spec-id> <source-doc>` → 宿主 agent 走 spec-prep → `./ai run` 或分步
+- 已有 spec，只执行一个任务：`./ai work <spec-id> <task-id>` + task-dev skill + `./ai done`
+- 任务完成后：pr-prep skill + `./ai pr <spec-id> <task-id> main`
 
-`./ai run` 会在 `.ai-harness/specs/<spec-id>/03-tasks.md` 的 `Run Checkpoint` 中记录当前 task、当前步骤和恢复命令。失败后优先查看 `Resume Command`，例如 `./ai work <spec-id> <task-id>` 或 `./ai pr <spec-id> <task-id> main`。
-
-`./ai` 会自动调用 `codex exec -C <business-repo> --sandbox workspace-write`，并将 approval policy 设为 `never`（按本机 Codex CLI 支持情况选择 `--ask-for-approval never` 或等价配置）。它不会使用危险的 sandbox 绕过参数，也不会直接调用 GitLab API 创建 MR。
-
-如果使用 Claude Code、OpenClaw、Gemini CLI、Copilot CLI 或内部 AI 程序，不要让这些工具调用 `./ai run/spec/work/pr`，因为这些命令会调度 Codex。其他具备仓库读写能力的 AI 程序应读取：
-
-```text
-.ai-harness/.ai-standards/templates/prompts/serial-task-pipeline.md
-```
-
-并使用 `Execution Mode: portable-managed`。该模式允许其他 AI 程序按 `03-tasks.md` 依赖顺序串行执行 task，但每个 `task-id` 必须独立完成验证、acceptance 更新和 PR 材料。
+`./ai run` 会在 `.ai-harness/specs/<spec-id>/03-tasks.md` 的 `Run Checkpoint` 中记录当前 task、当前步骤和恢复命令。失败后执行 `./ai resume <spec-id>`，按输出的 Resume Command 继续。
 
 ## Bootstrap
 
 推荐从业务仓库根目录执行一条初始化命令：
 
 ```bash
-bash /path/to/ai-coding-standards/scripts/init_business_repo.sh <repo-url-of-ai-coding-standards>
+bash /path/to/harness-engineering-v2/scripts/init_business_repo.sh <repo-url-of-harness-engineering-v2>
 ```
 
 该命令会添加 submodule、执行 bootstrap，并运行 `./ai status` 验证入口。
@@ -48,7 +43,7 @@ bash /path/to/ai-coding-standards/scripts/init_business_repo.sh <repo-url-of-ai-
 1. 添加规范源仓库 submodule：
 
 ```bash
-git submodule add <repo-url-of-ai-coding-standards> .ai-harness/.ai-standards
+git submodule add <repo-url> .ai-harness/.ai-standards
 git submodule update --init --recursive
 ```
 
@@ -82,9 +77,11 @@ git add .ai-harness .github ai
 git commit -m "chore(standards): upgrade ai coding standards"
 ```
 
+v1 → v2 升级：bootstrap 检测到旧版 Codex 编排器 `./ai` 时自动替换为 v2 薄编排器；存量 spec 四件套格式不变，仅建议逐步为 `04-acceptance.md` 补 `Validation Command:` 行。
+
 ## Advanced Script Usage
 
-底层脚本仍可单独调用：
+底层脚本仍可单独调用（排错/受限环境）：
 
 1. 创建 spec 骨架：
 
@@ -92,45 +89,25 @@ git commit -m "chore(standards): upgrade ai coding standards"
 bash .ai-harness/.ai-standards/scripts/init_spec.sh <spec-id>
 ```
 
-2. 基于需求文档或方案文档生成给 AI 的补全提示词：
-
-```bash
-bash .ai-harness/.ai-standards/scripts/prepare_spec_prompt.sh <spec-id> <source-doc>
-```
-
-3. 基于当前 task 生成开发提示词：
-
-```bash
-bash .ai-harness/.ai-standards/scripts/prepare_task_prompt.sh <spec-id> <task-id>
-```
-
-4. 基于当前 task 和分支生成 PR 准备提示词：
-
-```bash
-bash .ai-harness/.ai-standards/scripts/prepare_pr_prompt.sh <spec-id> <task-id> <target-branch> <feature-branch>
-```
-
-5. 为其他 AI 程序生成串行 task 执行提示词：
-
-```bash
-bash .ai-harness/.ai-standards/scripts/prepare_serial_task_prompt.sh <spec-id> [source-doc] [target-branch]
-```
-
-该脚本只渲染 `serial-task-pipeline.md`，不会调用 Codex。`target-branch` 可省略，默认使用当前所在 git 分支；`source-doc` 可省略，表示基于已有 spec 继续执行。`source-doc` 是普通业务需求文档，可以是 PRD、方案说明、缺陷描述、验收口径或用户故事。
-
-6. 检查 spec 是否仍有明显未填写内容：
+2. 检查 spec 是否仍有明显未填写内容：
 
 ```bash
 bash .ai-harness/.ai-standards/scripts/check_spec.sh <spec-id>
 ```
 
+3. 单独执行质量门禁（`./ai done` 内部即调它）：
+
+```bash
+bash .ai-harness/.ai-standards/scripts/run_gate.sh <spec-id> <task-id> .ai-harness/specs/<spec-id>/04-acceptance.md
+```
+
 ## Script Summary
 
-- `ai_workflow.sh`
-- `./ai` 的统一编排器，承载 `status/spec/next/work/pr/run` 子命令。
+- `templates/ai.sh` → `./ai`
+- 业务仓库根目录的薄机械编排器，承载 `status/spec/next/work/done/pr/run/resume/skill` 子命令。不调用任何 AI 程序。
 
 - `bootstrap_repo.sh`
-- 初始化 `.ai-harness/`、业务仓库 `AGENTS.md`、PR 模板、changelog 目录和根目录 `./ai`。
+- 初始化 `.ai-harness/`、业务仓库 `AGENTS.md`、PR 模板、changelog 目录和根目录 `./ai`；检测旧版 Codex 编排器并自动升级替换。
 
 - `init_business_repo.sh`
 - 从业务仓库根目录执行的一键初始化入口，负责添加规范源 submodule、运行 bootstrap，并验证 `./ai status`。
@@ -138,41 +115,20 @@ bash .ai-harness/.ai-standards/scripts/check_spec.sh <spec-id>
 - `update_business_standards.sh`
 - 从业务仓库根目录执行的规范升级入口，负责更新规范源 submodule、运行 bootstrap，并验证 `./ai status`。
 
+- `run_gate.sh`
+- v2 质量门禁：从 `04-acceptance.md` 读取 `Validation Command:` 行并逐条执行，全过才放行提交；无命令时退化为要求 `Final Decision` 已写 YES。
+
 - `init_spec.sh`
 - 创建 `.ai-harness/specs/<spec-id>/` 并复制 spec 四件套。
-
-- `prepare_spec_prompt.sh`
-- 输出可复制给其他 AI 程序的 spec preparation 提示词。
-
-- `prepare_task_prompt.sh`
-- 输出可复制给其他 AI 程序的单任务开发提示词。
-
-- `prepare_pr_prompt.sh`
-- 输出可复制给其他 AI 程序的 PR 准备提示词。
-
-- `prepare_serial_task_prompt.sh`
-- 输出可复制给其他具备仓库读写能力的 AI 程序的串行 task 执行提示词，不调用 Codex。
-
-- `templates/prompts/serial-task-pipeline.md`
-- 面向其他具备仓库读写能力的 AI 程序，用于在一个 spec 下按依赖顺序串行执行 task，同时保持一个 PR 对应一个 `task-id`。
 
 - `check_spec.sh`
 - 检查 spec 四件套是否存在，以及是否仍残留模板占位内容。
 
-- `lib/git_utils.sh`
-- 封装分支、脏工作区 stash、commit、push 和 diff 信息。
-
-- `lib/spec_utils.sh`
-- 解析 `03-tasks.md` 中的 task id、复杂度、依赖和完成状态。
-
-- `lib/codex_runner.sh`
-- 封装 `codex exec` 调用和日志路径。
-
 ## Notes
 
-- `./ai work` 开始前会将已有脏工作区保存为带时间戳的 named stash，并在输出中给出恢复提示；目标 spec 文件的未提交修改会保留在工作区。
+- `./ai work` 开始前会把与当前 spec 无关的脏文件保存为带时间戳的 named stash，并输出恢复提示；spec 目录内的未提交修改保留在工作区作为任务上下文。
+- `./ai done` 门禁失败时不提交，打印失败命令的输出尾部；阻塞原因应写进 `04-acceptance.md`，由人工评审决定。
 - `./ai pr` 会在提交和推送前暂停，要求人工确认 diff、测试证据、风险、回滚方案、commit message 和 MR 描述。
-- 当前 v1 不自动创建 GitLab MR；只生成 MR 材料和推送分支。
-- `prepare_spec_prompt.sh`、`prepare_task_prompt.sh`、`prepare_pr_prompt.sh` 和 `prepare_serial_task_prompt.sh` 只生成提示词，适合 portable-managed、prompt-only 或排错场景。
+- 不自动调用 GitLab/GitHub API 创建 MR；只生成 MR 材料文件和推送分支。
 - `check_spec.sh` 是轻量静态检查，不等价于人工评审或业务验收。
-- 这些脚本加在规范源仓库后，业务仓库可以直接通过 `.ai-harness/.ai-standards/scripts/*.sh` 调用；前提是业务仓库的 submodule 已更新到包含这些脚本的版本。
+- 这些脚本随规范源仓库版本走；业务仓库通过 submodule 锁定版本，通过 `update_business_standards.sh` 升级。
