@@ -106,7 +106,8 @@ bash /path/to/harness-engineering-v2/scripts/init_business_repo.sh <repo-url-of-
 请读取 ./ai skill spec-prep 指向的 SKILL.md，
 基于 .ai-harness/specs/<spec-id>/source.md 补齐四件套。
 要求每个 task 在 04-acceptance.md 写至少一条 Validation Command。
-任务拆分按 SKILL.md 的「为并行而拆」原则：能独立的标 (none)，ready task 数尽量 ≥ 10。
+任务拆分按 SKILL.md 的「为并行而拆」原则：能独立的标 (none)，倾向多拆小拆，
+但每个 task 保持可独立过门禁的完整闭环，不过度切碎。
 完成后输出：每个文件的完成摘要、Open Questions、推荐的第一个 ready task、并行度评估。
 ```
 
@@ -117,7 +118,7 @@ bash /path/to/harness-engineering-v2/scripts/init_business_repo.sh <repo-url-of-
 - `04-acceptance.md` 每个 task 有 Validation Command。
 - `M/L` 任务已补齐设计或拆小。
 - Open Questions 不阻塞当前 task。
-- （计划走并行模式时）ready task 数量 ≥ 计划并发子代理数，依赖链短、共享文件已收敛为前置 task。
+- （计划走并行模式时）ready task 数量与并发子代理数匹配（吃不满时看并行度评估说明，判断是业务依赖所限还是拆分不足），共享文件已收敛为前置 task。
 
 ### 4. 执行单个 task
 
