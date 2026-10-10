@@ -47,15 +47,16 @@ say "ensure: $CHANGELOG_DIR"
 copy_if_missing "$ROOT_DIR/templates/business-repo-AGENTS.md" "$REPO_AGENTS"
 copy_if_missing "$ROOT_DIR/templates/pull_request_template.md" "$PR_TEMPLATE"
 copy_if_missing "$ROOT_DIR/docs/changelog/README.md" "$CHANGELOG_DIR/README.md"
-# v2：ai.sh 是薄机械编排器（无 Codex 依赖）；已初始化过的仓库若还是旧版 ./ai，则升级替换。
-if [[ -f "$AI_ENTRY" && -z "$(grep -l 'thin mechanical orchestrator' "$AI_ENTRY" 2>/dev/null)" ]]; then
-  cp "$ROOT_DIR/templates/ai.sh" "$AI_ENTRY"
-  chmod +x "$AI_ENTRY"
-  say "upgrade: $AI_ENTRY (v1 Codex orchestrator -> v2 thin orchestrator)"
-elif [[ ! -f "$AI_ENTRY" ]]; then
+# v2：ai.sh 是薄机械编排器（无 Codex 依赖）；已初始化过的仓库若是旧版 ./ai 则升级替换，
+# 是旧版 v2 则按内容哈希追平（grep 标记法对已带标记但内容过期的文件不生效，故用 cmp）。
+if [[ ! -f "$AI_ENTRY" ]]; then
   cp "$ROOT_DIR/templates/ai.sh" "$AI_ENTRY"
   chmod +x "$AI_ENTRY"
   say "create: $AI_ENTRY"
+elif ! cmp -s "$ROOT_DIR/templates/ai.sh" "$AI_ENTRY"; then
+  cp "$ROOT_DIR/templates/ai.sh" "$AI_ENTRY"
+  chmod +x "$AI_ENTRY"
+  say "upgrade: $AI_ENTRY -> $(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo latest)"
 fi
 
 say ""
