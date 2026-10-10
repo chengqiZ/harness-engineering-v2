@@ -504,14 +504,61 @@ cmd_collect() {
   branch="feat/$spec_id-$task_id"
   git show-ref --verify --quiet "refs/heads/$branch" \
     || fail "branch not found: $branch (did the sub-agent run ./ai done?)"
+  # 进度文件是共享区，并发 done 各自改自己的行，收集时几乎必冲突。
+  # 03-tasks.md 的合并策略固定：Progress 勾选取两边的并集（- [x] 胜出）、
+  # In-Flight 取差集（去掉被收集的）；其余字段如有冲突仍走人工。
   git merge --no-ff --no-edit -m "chore(${spec_id}): collect parallel task ${task_id}" "$branch" 2>/dev/null \
-    || { git merge --abort 2>/dev/null || true; fail "merge conflict collecting $branch; resolve manually"; }
+    || collect_merge_progress_conflict "$tasks_file" "$branch" "$task_id"
   tick_progress "$tasks_file" "$task_id"
   clear_in_flight "$tasks_file" "$task_id"
+  git add -A && git commit -qm "chore(${spec_id}): settle progress file for ${task_id}" || true
   git worktree remove --force "$WT_DIR/${spec_id}-${task_id}" 2>/dev/null || true
   git branch -D "$branch" 2>/dev/null || true
   say "collected: $task_id -> $(git symbolic-ref --short HEAD)"
   say "worktree removed; branch deleted"
+}
+
+collect_merge_progress_conflict() {
+  # merge 冲突仅限进度文件时的自动解法：勾选并集 + 去掉本 task 的 In-Flight。
+  # 依赖 python3（实现并集逻辑比纯 awk 可靠）；非进度文件冲突仍走人工。
+  local tasks_file="$1" branch="$2" task_id="$3"
+  local conflict_files
+  conflict_files="$(git diff --name-only --diff-filter=U)"
+  if printf '%s\n' "$conflict_files" | grep -qv "^$tasks_file$"; then
+    git merge --abort 2>/dev/null || true
+    fail "merge conflict collecting $branch affects non-progress files; resolve manually: $(printf '%s' "$conflict_files" | tr '\n' ' ')"
+  fi
+  # 仅进度文件冲突：以 ours 为基底，叠加 theirs 的新增勾选（并集），
+  # 再去掉本 task 的 In-Flight 行。
+  local ours
+  ours="$(mktemp)"
+  git show ":2:$tasks_file" > "$ours" 2>/dev/null || cp "$tasks_file" "$ours"
+  command -v python3 >/dev/null 2>&1 \
+    || { git merge --abort 2>/dev/null || true; fail "progress-file conflict needs python3 (not found); resolve manually"; }
+  python3 - "$ours" ":3:$tasks_file" "$tasks_file" "$task_id" <<'PYEOF'
+import re, subprocess, sys
+ours_p, theirs_ref, out_p, task_id = sys.argv[1:5]
+ours = open(ours_p).read().splitlines()
+theirs = subprocess.run(["git", "show", theirs_ref], capture_output=True, text=True, check=True).stdout.splitlines()
+def ticks(lines):
+    text = "\n".join(lines)
+    return set(re.findall(r"^- \[x\][\s`]*([^\s`]+)", text, re.M))
+tick_re = re.compile(r"^- \[ \][\s`]+([^\s`]+)")
+merged_ticks = ticks(ours) | ticks(theirs)
+out = []
+for l in ours:
+    m = tick_re.match(l)
+    if m and m.group(1).strip("`") in merged_ticks:
+        l = l.replace("- [ ]", "- [x]", 1)
+    if re.match(r"^- In-Flight: `?%s" % re.escape(task_id), l):
+        continue
+    out.append(l)
+open(out_p, "w").write("\n".join(out) + "\n")
+PYEOF
+  git add "$tasks_file"
+  git -c core.editor=true merge --continue >/dev/null 2>&1 \
+    || git commit -qm "chore: collect progress merge for ${task_id}"
+  say "progress file auto-merged (tick union, in-flight cleared): $tasks_file"
 }
 
 # ---------------------------------------------------------------------------
