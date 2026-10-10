@@ -129,6 +129,9 @@ cmd_work() {
   local tasks_file branch base_branch stash_name
   tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
   [[ -f "$tasks_file" ]] || fail "missing $tasks_file"
+  # spec 未过占位检查时禁止进入开发（与 v1 Gate 一致：先有完整 spec 才许动代码）。
+  bash "$(standards_script check_spec.sh)" "$spec_id" >/dev/null 2>&1 \
+    || fail "spec $spec_id not ready: run bash $(standards_script check_spec.sh) $spec_id and fix the listed issues first"
   task_exists "$tasks_file" "$task_id" || fail "task id not found: $task_id"
   task_done "$tasks_file" "$task_id" && fail "task already marked done: $task_id"
   task_dependencies_met "$tasks_file" "$task_id" || fail "dependencies are not complete for task: $task_id"
