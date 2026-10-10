@@ -233,6 +233,12 @@ cmd_pr() {
   local spec_id="$1" task_id="$2" target_branch="${3:-main}"
   local feature_branch pr_dir pr_file diffstat
   feature_branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo HEAD)"
+  # pr 必须在任务分支上执行：在 main/detached 上误跑会生成 Source=Target 的废材料，
+  # 且把 MR 材料提交进目标分支本身。
+  local expected_branch="feat/$spec_id-$task_id"
+  if [[ "$feature_branch" != "$expected_branch" ]]; then
+    fail "not on task branch: expected $expected_branch, current is $feature_branch; switch and retry (after collect in parallel mode, use ./ai pr on the collected main instead of running it inside a worktree)"
+  fi
   pr_dir="$HARNESS_DIR/pr"
   mkdir -p "$pr_dir"
   pr_file="$pr_dir/${spec_id}-${task_id}-mr.md"
@@ -249,7 +255,9 @@ cmd_pr() {
   confirm_or_stop "Review $pr_file and commit/push branch $feature_branch to origin"
   git add -A
   git diff --cached --quiet || git commit -m "chore(${spec_id}): mr material for ${task_id}"
-  git push -u origin "$feature_branch"
+  # push 是外发动作：失败必须显式失败（set -e 会中断，这里补一句可读错误提示）。
+  git push -u origin "$feature_branch" \
+    || fail "push failed for $feature_branch (remote/permissions?); MR material kept at $pr_file"
   say "pushed: $feature_branch"
   say "mr material: $pr_file"
   say "GitLab/GitHub MR was not created automatically; use the material file."
@@ -261,9 +269,18 @@ cmd_pr() {
 cmd_run() {
   local spec_id="$1" source_doc="${2:-}"
   cmd_spec "$spec_id" "$source_doc"
-  local next_out task_id
+  local next_out task_id tasks_file complexity
   next_out="$(cmd_next "$spec_id")"
   task_id="$(printf '%s\n' "$next_out" | head -n 1)"
+  tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
+  complexity="$(task_complexity "$tasks_file" "$task_id")"
+  # 一键串行不旁路风险分级：M/L 任务要求人工确认后才能自动推进。
+  # AI_CONFIRM=1 只豁免「已完成人工评审」的交互确认门，不豁免本门——
+  # M/L 的确认点在「看设计、定影响面」，属于 never-skip 类（见 serial-task SKILL）。
+  if [[ "$complexity" != "S" && "${AI_RUN_ALLOW_ML:-}" != "1" ]]; then
+    checkpoint_write "$spec_id" "$task_id" "work" "./ai work $spec_id $task_id"
+    fail "run stopped: task $task_id is $complexity; review 02-design.md, then run './ai work $spec_id $task_id' manually (or export AI_RUN_ALLOW_ML=1 to override)"
+  fi
   checkpoint_write "$spec_id" "$task_id" "work" "./ai work $spec_id $task_id"
   cmd_work "$spec_id" "$task_id"
   checkpoint_write "$spec_id" "$task_id" "done" "./ai done $spec_id $task_id"
@@ -287,14 +304,17 @@ checkpoint_write() {
   tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
   [[ -f "$tasks_file" ]] || return 0
   tmp="$(mktemp)"
+  # 注意 awk 程序体必须整体单引号：早期版本在单双引号间穿插 bash 展开，
+  # Current Task/Current Step 被展开成空值写进进度文件，resume 恢复时拿不到任务号。
+  # 值一律走 -v 传入（awk 内用反引号字面量拼接，不再靠 shell 展开注入）。
   awk -v task="$task_id" -v step="$step" -v rcmd="$resume_cmd" '
     function print_ckpt() {
       print "## Run Checkpoint"
       print ""
-      print "- Last Command: `'"$resume_cmd"'`"
-      print "- Current Task: `"'"$task_id"'"`"
-      print "- Current Step: `"'"$step"'"`"
-      print "- Resume Command: `'"$resume_cmd"'`"
+      print "- Last Command: `" rcmd "`"
+      print "- Current Task: `" task "`"
+      print "- Current Step: `" step "`"
+      print "- Resume Command: `" rcmd "`"
       print "- Last Result: pending"
       print "- Last Error:"
     }
@@ -355,9 +375,10 @@ task_field() {
 }
 
 task_done() {
-  local done progress
-  done="$(task_field "$1" "$2" "Done" | tr '[:upper:]' '[:lower:]')"
-  [[ "$done" =~ (^|[^a-z])(yes|true|done|complete|completed|已完成)([^a-z]|$) ]] && return 0
+  # 完成判定的唯一权威：## Progress 区的 [x] 勾选（由 done/collect 机械回写）。
+  # Done: 字段是「完成判据描述」（如「脚本幂等」），语义上不是完成声明——
+  # 早期版本把含 yes/已完成 等词的 Done 描述误判为已完成，导致未干任务被跳过。
+  local progress
   progress="$(awk -v task="$2" '
     $0 ~ /^## Progress/ { in_progress=1; next }
     in_progress && $0 ~ /^## / { in_progress=0 }

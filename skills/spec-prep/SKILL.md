@@ -41,6 +41,10 @@ description: "Use when initializing or completing a spec four-piece set (01-requ
 
 **v2 关键要求**：每个 task 在 `04-acceptance.md` 至少一条 `- Validation Command:` 行（shell 可执行，如 `pytest tests/unit -k foo`、`mvn compile`）。这是 `./ai done` 质量门禁的输入，没有它门禁退化为仅查 YES 结论。
 
+**多 task spec 的分节格式（并行模式必须）**：多个 task 时，`04-acceptance.md` 的 Validation Commands 区按 `### <task-id>` 分节组织（如 `### T1` 下挂 T1 的命令行）。门禁执行器遇分节只跑当前 task 小节内的命令——不分节则退回旧语义（跑全部命令），并行子代理在隔离 worktree 里会因缺其他 task 的产物而误杀。
+
+**信任边界警示**：Validation Command 由 shell 直接执行（`eval`）。谁写 spec 谁就拥有门禁的代码执行权——生成 spec 的 agent 与执行门禁的 agent 通常是同一个，门禁的独立性来自**人工确认 spec 四件套**这道关。因此 spec 四件套在开发前必须经过人工评审（尤其 Validation Command 行），确认判据本身可信、且命令只做验证不做副作用。
+
 ## 约束
 
 - 不写、不改运行时代码
