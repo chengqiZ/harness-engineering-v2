@@ -32,6 +32,13 @@ description: "Use when initializing or completing a spec four-piece set (01-requ
 3. `03-tasks.md`：拆 task，每个 task 必须含 `Task ID/Purpose/Inputs/Changes/Validation/Done/Complexity/Depends On`
 4. `04-acceptance.md`：为每个 task 写验收判据
 
+**任务拆分原则——为并行而拆（重要）**：
+
+- **能并行的尽量并行**：task 之间默认追求 `(none)` 依赖。只有真实的运行时/数据依赖（B 的输入是 A 的产物）才写 `Depends On`；「顺手一起做」不是依赖，禁止为了串行省事把独立改动捆成一个 task。
+- **颗粒度就小不就大**：目标是 03-tasks.md 里 ready task 数量 ≥ 并发子代理数（默认 10）。如果一个 task 预估要改 3+ 文件、或里面能分出「可独立验证的子步骤」，就继续拆——每个 task 应当能被一个子代理在一个 worktree 里独立完成并独立过门禁。
+- **拆分判定**：写 task 时自问「这两个 task 在两个隔离工作区里同时开发，会不会改同一个文件 / 需要对方的产物」——会 → 保留依赖或合并；不会 → 拆开标 `(none)`。
+- **公共底座先行**：多个 task 都要改的共享文件（类型定义、接口契约、公共组件）先拆成一个前置 task，让其他 task `Depends On` 它，避免并行子代理在同文件上撞车。
+
 **v2 关键要求**：每个 task 在 `04-acceptance.md` 至少一条 `- Validation Command:` 行（shell 可执行，如 `pytest tests/unit -k foo`、`mvn compile`）。这是 `./ai done` 质量门禁的输入，没有它门禁退化为仅查 YES 结论。
 
 ## 约束
@@ -44,4 +51,4 @@ description: "Use when initializing or completing a spec four-piece set (01-requ
 
 ## 输出
 
-完成后输出：每个文件的完成摘要、未解决的 Open Questions 清单、推荐的第一个 ready task。等待人工确认后才进入开发。
+完成后输出：每个文件的完成摘要、未解决的 Open Questions 清单、推荐的第一个 ready task，以及**并行度评估**（当前 ready task 数量、依赖链最深路径、按 10 并发估算的批次划分）。等待人工确认后才进入开发。

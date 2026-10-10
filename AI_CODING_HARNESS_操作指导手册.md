@@ -102,7 +102,9 @@ skills 一览（宿主 agent 按需加载）：
 
 ### 3.5 最大并发子代理（parallel-task，worktree 隔离）
 
-对宿主 agent 说：「读取 `./ai skill parallel-task` 指向的 SKILL.md，**最大并发执行**」。主代理不写码，只做三件事：`./ai ready` 拿可开工清单 → 每个任务派一个子代理（并发开满）→ 子代理完成后 `./ai collect` 回收并管理进度文件。每个子代理独占一个 git worktree（`./ai worktree`），互不踩工作区；门禁在各自 worktree 内跑自己 task 分节的 Validation Command；进度文件冲突由 collect 自动并集合并，业务文件冲突停下走人工。M/L、高风险任务不进并发池，降级 serial-task。
+对宿主 agent 说：「读取 `./ai skill parallel-task` 指向的 SKILL.md，**最大并发执行**」。主代理不写码，只做三件事：`./ai ready` 拿可开工清单 → 每个任务派一个子代理（**并发上限 10**，回收后立即补派保持满载）→ 子代理完成后 `./ai collect` 回收并管理进度文件（进度文件唯一写者）。每个子代理独占一个 git worktree（`./ai worktree`），互不踩工作区；门禁在各自 worktree 内跑自己 task 分节的 Validation Command；业务文件 merge 冲突停下走人工。M/L、高风险任务不进并发池，降级 serial-task。
+
+配套要求：spec 拆分遵循 spec-prep skill 的「为并行而拆」原则——能独立的 task 标 `(none)` 依赖、颗粒度尽量小、共享文件收敛为前置 task，ready task 数量应 ≥ 并发上限才能吃满并行度。
 
 ## 4. 质量门禁（v2 新增，重点）
 

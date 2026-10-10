@@ -7,13 +7,15 @@ description: "Use when a host agent drives maximum-concurrency sub-agents on one
 
 适用：宿主 agent 具备「子代理/并行会话」能力（Claude Code subagents、Codex 多实例、Hermes delegate_task、内部编排器等）。串行模式见 serial-task skill；本 skill 是它的并行版。
 
+**并发上限：默认 10 个子代理同时跑**（可用 `AI_HARNESS_MAX_SUBAGENTS` 覆盖）。宿主平台自身上限低于此值时以平台为准。
+
 ## 角色分工（硬性）
 
 主代理**不写码、不跑门禁**，只做三件事：
 
-1. **派活**：`./ai ready <spec-id>` 拿可开工清单，把每个 task 派给一个子代理，并发开满（受子代理平台上限约束，不是人为限速）。
+1. **派活**：`./ai ready <spec-id>` 拿可开工清单，把每个 task 派给一个子代理，并发开满到上限（默认 10，见文首；不为省事人为限速）。
 2. **进度管理**：03-tasks.md 是唯一进度源（in-flight 标记 + Progress 勾选），主代理负责回收后统一勾选，禁止子代理互相改进度。
-3. **回收**：子代理 done 后，主代理 `./ai collect <spec-id> <task-id>` 合分支、清 worktree。
+3. **回收**：子代理 done 后，主代理 `./ai collect <spec-id> <task-id>` 合分支、清 worktree；每回收一批就重跑 `./ai ready` 把刚解锁的任务立即补派，始终保持并发池满载。
 
 子代理只做一件事：在自己分到的 worktree 里按 task-dev skill 完成一个 task 的闭环（实现 → 验证 → `AI_CONFIRM=1 ./ai done`）。
 
