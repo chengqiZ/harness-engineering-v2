@@ -125,7 +125,8 @@ cmd_next() {
 # work：切任务分支 + 脏区 stash（保留 spec 目录作为任务上下文）
 # ---------------------------------------------------------------------------
 cmd_work() {
-  local spec_id="$1" task_id="$2" tasks_file branch base_branch stash_name
+  local spec_id="$1" task_id="$2"
+  local tasks_file branch base_branch stash_name
   tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
   [[ -f "$tasks_file" ]] || fail "missing $tasks_file"
   task_exists "$tasks_file" "$task_id" || fail "task id not found: $task_id"
@@ -281,7 +282,9 @@ checkpoint_pass() {
 # skill：打印 skills 路径（宿主 agent 由此加载阶段 SKILL.md）
 # ---------------------------------------------------------------------------
 cmd_skill() {
-  local name="$1" p="$STANDARDS_DIR/skills/$name/SKILL.md"
+  # 注意：两条 local 必须分开写——单行 local 里 $name 会在赋值前展开（外层未定义，set -u 报错）。
+  local name="$1"
+  local p="$STANDARDS_DIR/skills/$name/SKILL.md"
   [[ -f "$p" ]] || fail "skill not found: $name (expected $p)"
   say "$p"
 }
