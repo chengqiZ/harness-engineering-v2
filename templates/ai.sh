@@ -165,9 +165,15 @@ cmd_work() {
 # done：质量门禁 + 提交（不 push）
 #   门禁来源：04-acceptance.md 的 `Validation Command:` 行（shell 直判，
 #   允许用 $(...) 表达式）；无命令时退化为只查 acceptance 已有 YES 结论。
-#   提交前同时勾掉 03-tasks.md 的 Progress 复选框——完成状态由机械层回写，
-#   不依赖人工编辑（v1 缺口：done 提交后 next 仍返回同一 task）。
+#   进度文件 03-tasks.md 的唯一写者是主代理：串行模式下 done 顺手勾选；
+#   并行模式（在 worktree 内运行）子代理不写进度文件——勾选由主代理
+#   ./ai collect 统一做，从根上消除分支间进度冲突（单一写者原则）。
 # ---------------------------------------------------------------------------
+in_worktree() {
+  # git worktree 内 .git 是文件而非目录；主仓内是目录。
+  [[ -f .git ]]
+}
+
 tick_progress() {
   local tasks_file="$1" task_id="$2" tmp
   [[ -f "$tasks_file" ]] || return 0
@@ -194,7 +200,13 @@ cmd_done() {
   gate_script="$(standards_script run_gate.sh)"
   bash "$gate_script" "$spec_id" "$task_id" "$acc_file"
 
-  tick_progress "$tasks_file" "$task_id"
+  # 单一写者原则：worktree（并行模式子代理）内不勾进度文件，留待主代理
+  # collect 统一勾选；主仓内（串行/单人模式）done 照旧顺手勾选。
+  if ! in_worktree; then
+    tick_progress "$tasks_file" "$task_id"
+  else
+    say "parallel mode: progress file left untouched; main agent will tick on collect"
+  fi
 
   confirm_or_stop "Commit task $task_id (gate passed; will commit locally, not push)"
   local message_file
@@ -451,7 +463,10 @@ cmd_ready() {
   local spec_id="$1" tasks_file task_id
   tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
   [[ -f "$tasks_file" ]] || fail "missing $tasks_file"
+  # in-flight 的 task 不出现在派活清单里（已被某个子代理领走），主代理
+  # 只对剩余 ready task 补派。
   while IFS= read -r task_id; do
+    task_in_flight "$tasks_file" "$task_id" && continue
     printf '%s %s\n' "$task_id" "$(task_complexity "$tasks_file" "$task_id")"
   done < <(task_next_ready_all "$tasks_file")
 }
@@ -506,11 +521,12 @@ cmd_collect() {
   branch="feat/$spec_id-$task_id"
   git show-ref --verify --quiet "refs/heads/$branch" \
     || fail "branch not found: $branch (did the sub-agent run ./ai done?)"
-  # 进度文件是共享区，并发 done 各自改自己的行，收集时几乎必冲突。
-  # 03-tasks.md 的合并策略固定：Progress 勾选取两边的并集（- [x] 胜出）、
-  # In-Flight 取差集（去掉被收集的）；其余字段如有冲突仍走人工。
+  # 单一写者原则：子代理不再勾进度文件，collect 时进度文件通常零冲突；
+  # 若仍有冲突（人工在主仓直接改了进度文件等场景），仅进度文件冲突按
+  # 勾选并集自动合并，业务文件冲突停下走人工。
   git merge --no-ff --no-edit -m "chore(${spec_id}): collect parallel task ${task_id}" "$branch" 2>/dev/null \
     || collect_merge_progress_conflict "$tasks_file" "$branch" "$task_id"
+  # 主代理是进度文件的唯一写者：回收时统一勾选、清 in-flight 标记。
   tick_progress "$tasks_file" "$task_id"
   clear_in_flight "$tasks_file" "$task_id"
   git add -A && git commit -qm "chore(${spec_id}): settle progress file for ${task_id}" || true
