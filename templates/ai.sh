@@ -205,6 +205,8 @@ cmd_done() {
     printf 'What\n- See .ai-harness/specs/%s/04-acceptance.md for evidence.\n\n' "$spec_id"
     printf 'Validation\n- Gate commands from 04-acceptance.md executed via run_gate.sh; see acceptance evidence.\n'
   } > "$message_file"
+  # 只提交本 task 的 spec 目录与工作区业务变更；并行模式下别的子代理的
+  # in-flight 标记可能同时写进度文件，混提交会让 collect 的冲突自动合并失真。
   git add -A
   git diff --cached --quiet && fail "no staged changes to commit"
   git commit -F "$message_file"
