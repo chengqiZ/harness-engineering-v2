@@ -481,6 +481,10 @@ cmd_worktree() {
     git worktree add -b "$branch" "$wt_path" 2>/dev/null \
       || fail "cannot create worktree for $branch (branch or worktree already exists?)"
   fi
+  # 新 worktree 不会自动检出 submodule（.ai-harness/.ai-standards 为空目录），
+  # 子代理在 worktree 内跑 ./ai work/done 会因缺 check_spec.sh/run_gate.sh 失败；
+  # 机械层在这里统一拉起（本地路径协议需放行 file）。
+  git -c protocol.file.allow=always -C "$wt_path" submodule update --init --recursive >/dev/null 2>&1 || true
   mark_in_flight "$tasks_file" "$spec_id" "$task_id"
   say "worktree: $wt_path"
   say "branch: $branch"
