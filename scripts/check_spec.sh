@@ -115,12 +115,12 @@ if [[ -f "$SPEC_DIR/03-tasks.md" ]]; then
   deps_map="$(python3 - "$tasks_file" <<'PYEOF'
 import re, sys
 text = open(sys.argv[1]).read()
-ids = re.findall(r"^- Task ID:[[:space:]*`]*([^\s`]+)", text, re.M)
+ids = re.findall(r"^- Task ID:[ `]*([^\s`]+)", text, re.M)
 id_set = set(ids)
 blocks = re.split(r"^### ", text, flags=re.M)[1:]
 for b in blocks:
-    m = re.search(r"^- Task ID:[[:space:]*`]*([^\s`]+)", b, re.M)
-    d = re.search(r"^- Depends On:[[:space:]]*(.*)$", b, re.M)
+    m = re.search(r"^- Task ID:[ `]*([^\s`]+)", b, re.M)
+    d = re.search(r"^- Depends On:[ \t]*(.*)$", b, re.M)
     if not m:
         continue
     raw = d.group(1) if d else ""
@@ -149,8 +149,8 @@ text = open(sys.argv[1]).read()
 blocks = re.split(r"^### ", text, flags=re.M)[1:]
 deps = {}
 for b in blocks:
-    m = re.search(r"^- Task ID:[[:space:]*`]*([^\s`]+)", b, re.M)
-    d = re.search(r"^- Depends On:[[:space:]]*(.*)$", b, re.M)
+    m = re.search(r"^- Task ID:[ `]*([^\s`]+)", b, re.M)
+    d = re.search(r"^- Depends On:[ \t]*(.*)$", b, re.M)
     if not m:
         continue
     raw = (d.group(1) if d else "").replace("`", "")
