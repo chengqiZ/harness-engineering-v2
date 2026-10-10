@@ -541,6 +541,11 @@ cmd_collect() {
   local tasks_file branch
   tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
   [[ -f "$tasks_file" ]] || fail "missing $tasks_file"
+  # collect 只属于主代理、只在主仓执行：在 worktree 内误跑会把 task 分支合进
+  # 子代理分支而非目标分支（e2e 实测过此事故形态）。
+  if in_worktree; then
+    fail "collect must run in the main repository, not inside a worktree; cd <repo-root> first"
+  fi
   branch="feat/$spec_id-$task_id"
   git show-ref --verify --quiet "refs/heads/$branch" \
     || fail "branch not found: $branch (did the sub-agent run ./ai done?)"
