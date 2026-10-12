@@ -59,6 +59,17 @@ elif ! cmp -s "$ROOT_DIR/templates/ai.sh" "$AI_ENTRY"; then
   say "upgrade: $AI_ENTRY -> $(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo latest)"
 fi
 
+# v2.1.1：并行模式的 worktree 目录必须被 git 忽略——裸接入的业务仓没有
+# .gitignore，done/collect 的 git add -A 会把 worktree 当内嵌 git 仓收进提交
+# （实测实锤：主仓出现 gitlink、collect 删除 worktree 后变 deleted 假提交、
+# clone 侧得到指向不存在地址的空壳目录）。
+if grep -qF ".ai-harness/worktrees/" .gitignore 2>/dev/null; then
+  say "skip: .gitignore already ignores .ai-harness/worktrees/"
+else
+  printf '.ai-harness/worktrees/\n' >> .gitignore
+  say "ensure: .gitignore ignores .ai-harness/worktrees/"
+fi
+
 say ""
 say "bootstrap complete"
 say "manual follow-up:"

@@ -43,6 +43,7 @@ usage:
   ./ai work <spec-id> <task-id>        # 切到任务分支（脏区自动 stash）
   ./ai worktree <spec-id> <task-id>    # 并行模式：为 task 创建隔离 worktree（子代理入口）
   ./ai collect <spec-id> <task-id>     # 并行模式：回收 task 分支并勾进度（主代理专用）
+  ./ai unclaim <spec-id> <task-id>     # 并行模式：释放被领取的 task（阵亡重派前清尸体）
   ./ai done <spec-id> <task-id>        # 运行 04-acceptance 声明的验证命令并提交
   ./ai run <spec-id> [source-doc]      # spec → next → work → done 一键串行
   ./ai resume <spec-id>                # 从 03-tasks.md 的 Run Checkpoint 恢复
@@ -114,9 +115,12 @@ cmd_next() {
   local spec_id="$1" tasks_file task_id complexity
   tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
   [[ -f "$tasks_file" ]] || fail "missing $tasks_file"
+  # 与 ./ai ready 对齐：in-flight 的 task 不派发（已被并行子代理领走）。
+  # 早期 next 不过滤 in-flight，与 ready 互相矛盾——主代理若按 next 派活
+  # 会重复派发已领走的 task（实测实锤：阵亡重派场景死锁放大）。
   for complexity in S M L; do
     task_id="$(task_next_ready "$tasks_file" "$complexity" || true)"
-    if [[ -n "$task_id" ]]; then
+    if [[ -n "$task_id" ]] && ! task_in_flight "$tasks_file" "$task_id"; then
       say "$task_id"
       say "complexity: $complexity"
       [[ "$complexity" != "S" ]] && say "warning: $complexity task requires manual confirmation before development"
@@ -241,6 +245,11 @@ cmd_pr() {
   if [[ "$feature_branch" != "$expected_branch" ]]; then
     fail "not on task branch: expected $expected_branch, current is $feature_branch; switch and retry (after collect in parallel mode, use ./ai pr on the collected main instead of running it inside a worktree)"
   fi
+  # target 分支拼错（如 mian）没人拦：材料里 Target 写着错字照样推送，
+  # 开 MR 的人照着错字开分支。本地或远端存在性都认。
+  git show-ref --verify --quiet "refs/heads/$target_branch" \
+    || git ls-remote --exit-code --heads origin "$target_branch" >/dev/null 2>&1 \
+    || fail "target branch not found locally or on origin: $target_branch (typo?)"
   pr_dir="$HARNESS_DIR/pr"
   mkdir -p "$pr_dir"
   pr_file="$pr_dir/${spec_id}-${task_id}-mr.md"
@@ -495,6 +504,25 @@ cmd_ready() {
 }
 
 # ---------------------------------------------------------------------------
+# unclaim：主代理专用——释放被领取的 task（子代理阵亡/中断重派前清尸体）。
+#   只清 in-flight 标记，不动分支与 worktree（尸体清理由调用方按需做）；
+#   task 已完成时拒绝（应走 collect，而不是 unclaim）。
+# ---------------------------------------------------------------------------
+cmd_unclaim() {
+  local spec_id="$1" task_id="$2"
+  local tasks_file
+  tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
+  [[ -f "$tasks_file" ]] || fail "missing $tasks_file"
+  task_exists "$tasks_file" "$task_id" || fail "task id not found: $task_id"
+  task_done "$tasks_file" "$task_id" && fail "task already done: $task_id (collect it instead)"
+  task_in_flight "$tasks_file" "$task_id" \
+    || fail "task not in-flight: $task_id (nothing to release)"
+  clear_in_flight "$tasks_file" "$task_id"
+  say "released: $task_id is claimable again"
+  say "hint: remove leftover worktree/branch manually if the sub-agent died: git worktree remove --force $WT_DIR/${spec_id}-${task_id}; git branch -D feat/$spec_id-$task_id"
+}
+
+# ---------------------------------------------------------------------------
 # worktree：并行模式子代理专用——为 task 创建隔离工作区。
 #   子代理在 worktree 内照常 ./ai work → task-dev skill → ./ai done 闭环；
 #   提交落在 feat/<spec>-<task> 分支，由主代理 ./ai collect 回收。
@@ -619,6 +647,7 @@ main() {
     work)   [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_work "$1" "$2" ;;
     worktree) [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_worktree "$1" "$2" ;;
     collect) [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_collect "$1" "$2" ;;
+    unclaim) [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_unclaim "$1" "$2" ;;
     done)   [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_done "$1" "$2" ;;
     pr)     [[ $# -ge 2 && $# -le 3 ]] || { usage; exit 1; }; cmd_pr "$@" ;;
     run)    [[ $# -ge 1 ]] || { usage; exit 1; }; cmd_run "$@" ;;

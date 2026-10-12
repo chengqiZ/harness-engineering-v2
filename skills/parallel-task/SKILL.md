@@ -25,6 +25,7 @@ description: "Use when a host agent drives maximum-concurrency sub-agents on one
 ./ai ready <spec-id>                # 主代理：所有依赖满足、未完成、未派发的 task
 ./ai worktree <spec-id> <task-id>   # 子代理入口：创建隔离 worktree + feat/<spec>-<task> 分支
 ./ai collect <spec-id> <task-id>    # 主代理：合并回当前分支、勾进度、删 worktree 和分支
+./ai unclaim <spec-id> <task-id>    # 主代理：释放被领取的 task（子代理阵亡/重派前清尸体）
 ```
 
 worktree 落在 `.ai-harness/worktrees/<spec>-<task>`（可用 `AI_HARNESS_WT_DIR` 重定向）。子代理在 worktree 内照常 `./ai work` → task-dev skill → `./ai done`，与串行流程完全一致。
@@ -57,7 +58,7 @@ worktree 落在 `.ai-harness/worktrees/<spec>-<task>`（可用 `AI_HARNESS_WT_DI
 - 同一 task 只派一个子代理（`./ai worktree` 的 in-flight 标记拒绝重复领取）。
 - **进度文件 03-tasks.md 只有主代理写**：子代理的 `./ai done` 在 worktree 内不会勾选 Progress（单一写者原则）；勾选和 in-flight 清理都发生在主代理 `./ai collect` 时。子代理也不要手动编辑 03-tasks.md。
 - M/L 或高风险 task（DB migration、auth/权限、billing、风控、共享核心组件）**不进并发池**：降级为串行 + 每步人工确认（走 serial-task）。
-- 子代理阵亡零产出 → 主代理重派前先清尸体：`git worktree remove --force` + 删除对应分支，再 `./ai worktree` 重建。
+- 子代理阵亡零产出 → 主代理重派前先清尸体：`./ai unclaim <spec-id> <task-id>` 释放领取标记，再 `git worktree remove --force` + 删除对应分支（若 `unclaim` 不可用则手工删 03-tasks.md 里该 task 的 `- In-Flight:` 行），然后重新 `./ai worktree`。
 - 验证/门禁失败的 task：主代理不接管修码，选择「带错误反馈重派子代理」或「升级人工」。
 
 ## 禁止

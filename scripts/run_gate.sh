@@ -46,11 +46,19 @@ mapfile -t commands < <(extract_commands "$ACC_FILE" "$TASK_ID")
 if [[ ${#commands[@]} -eq 0 ]]; then
   printf 'gate: no Validation Command found for task %s in %s\n' "$TASK_ID" "$ACC_FILE"
   printf 'gate: degenerate check — requiring explicit YES in Final Decision\n'
-  if grep -A1 '^## Final Decision' "$ACC_FILE" | grep -qiE 'yes'; then
+  # Merge decision 的值必须精确为 YES：模板占位 `YES/NO`、NO、空值都算未决策。
+  # 早期用 grep -A1 只看标题下一行，被标题后的空行挡住——人工已勾 YES 也 FAIL。
+  decision="$(awk '
+    /^## Final Decision/ { seen = 1; next }
+    seen && /^- Merge decision:/ {
+      sub(/^- Merge decision:[[:space:]]*/, ""); gsub(/`/, ""); print; exit
+    }
+  ' "$ACC_FILE")"
+  if [[ "$decision" =~ ^[[:space:]]*YES[[:space:]]*$ ]]; then
     printf 'gate: PASS (degenerate, no machine criteria)\n'
     exit 0
   fi
-  printf 'gate: FAIL — no Validation Command and no explicit YES decision\n' >&2
+  printf 'gate: FAIL — no Validation Command and no explicit YES decision (got: %s)\n' "${decision:-<none>}" >&2
   exit 1
 fi
 
