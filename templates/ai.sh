@@ -230,7 +230,7 @@ tick_progress() {
   awk -v task="$task_id" '
     /^## Progress/ { in_progress=1 }
     in_progress && $0 ~ ("^- \\[ \\][[:space:]]+`?" task "`?([[:space:]]|$)") {
-      sub(/^- \\[ \\]/, "- [x]")
+      sub(/^- \[ \]/, "- [x]")
       in_progress=0
     }
     { print }
