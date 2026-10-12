@@ -186,8 +186,23 @@ cmd_work() {
     # 不自动解决——与 collect 的冲突纪律一致。
     for dep in "${merge_deps[@]:-${dep_base:-}}"; do
       [[ -z "$dep" || "$dep" = "$base_branch" ]] && continue
-      git merge --no-edit "$dep" >/dev/null 2>&1 \
-        || fail "merge of dependency branch $dep into $branch conflicts; resolve manually and re-run"
+      # 依赖分支各自改进度文件（勾自己），双依赖 merge 必然在 03-tasks.md 撞车：
+      # 冲突仅限进度文件时按勾选并集自动合并（与 collect 同策略）；其他文件冲突停下走人工。
+      if ! git merge --no-edit "$dep" >/dev/null 2>&1; then
+        local conflict_files
+        conflict_files="$(git diff --name-only --diff-filter=U)"
+        if printf '%s\n' "$conflict_files" | grep -qv "^$tasks_file$"; then
+          git merge --abort >/dev/null 2>&1 || true
+          fail "merge of dependency branch $dep into $branch conflicts on non-progress files; resolve manually and re-run"
+        fi
+        printf '%s\n' "$conflict_files" | grep -q "^$tasks_file$" \
+          || fail "merge of dependency branch $dep into $branch conflicts; resolve manually and re-run"
+        merge_progress_union "$tasks_file" "$dep" || { git merge --abort >/dev/null 2>&1 || true; fail "progress union merge failed for $dep; resolve manually"; }
+        git add "$tasks_file"
+        git -c core.editor=true merge --continue >/dev/null 2>&1 \
+          || git commit -qm "chore: merge dependency branch $dep (progress union)" \
+          || true
+      fi
     done
   fi
   say "base branch: $base_branch"
@@ -215,12 +230,38 @@ tick_progress() {
   awk -v task="$task_id" '
     /^## Progress/ { in_progress=1 }
     in_progress && $0 ~ ("^- \\[ \\][[:space:]]+`?" task "`?([[:space:]]|$)") {
-      sub(/^- \[ \]/, "- [x]")
+      sub(/^- \\[ \\]/, "- [x]")
       in_progress=0
     }
     { print }
   ' "$tasks_file" > "$tmp"
   mv "$tmp" "$tasks_file"
+}
+
+# 进度文件勾选并集（work 的双依赖 merge 冲突时用，与 collect 同策略）：
+# 以当前分支版本为基底，叠加被合分支的新增勾选；In-Flight 标记取并集。
+merge_progress_union() {
+  local tasks_file="$1" dep_branch="$2"
+  command -v python3 >/dev/null 2>&1 || return 1
+  local ours
+  ours="$(mktemp)"
+  git show ":2:$tasks_file" > "$ours" 2>/dev/null || return 1
+  python3 - "$ours" "$tasks_file" "$dep_branch" <<'PYEOF'
+import re, subprocess, sys
+ours_p, tasks_p, dep_branch = sys.argv[1:4]
+ours = open(ours_p).read().splitlines()
+theirs = subprocess.run(["git", "show", f"{dep_branch}:{tasks_p}"], capture_output=True, text=True).stdout.splitlines()
+def ticks(lines):
+    return set(re.findall(r"^- \[x\][\s`]*([^\s`]+)", "\n".join(lines), re.M))
+merged = ticks(ours) | ticks(theirs)
+out = []
+for l in ours:
+    m = re.match(r"^- \[ \][\s`]+([^\s`]+)", l)
+    if m and m.group(1).strip("`") in merged:
+        l = l.replace("- [ ]", "- [x]", 1)
+    out.append(l)
+open(tasks_p, "w").write("\n".join(out) + "\n")
+PYEOF
 }
 
 cmd_done() {
@@ -230,6 +271,12 @@ cmd_done() {
   [[ -f "$tasks_file" ]] || fail "missing $tasks_file"
   [[ -f "$acc_file" ]] || fail "missing $acc_file"
   task_exists "$tasks_file" "$task_id" || fail "task id not found: $task_id"
+
+  # 冲突残留守卫：work 的依赖 merge 冲突（或其他来源的冲突状态）未解决时，
+  # add -A 会把冲突标记直接提交进分支（实测实锤：T4 双依赖冲突后 done 把
+  # <<<<<<< ======= >>>>>>> 提交进了 feat 分支）。门禁前先拒绝。
+  [[ -z "$(git ls-files -u | head -1)" ]] \
+    || fail "unresolved merge conflicts in workspace (git ls-files -u non-empty); resolve before ./ai done"
 
   gate_script="$(standards_script run_gate.sh)"
   bash "$gate_script" "$spec_id" "$task_id" "$acc_file"
