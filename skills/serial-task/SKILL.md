@@ -23,7 +23,7 @@ description: "Use when a host agent (Claude Code, Codex, OpenClaw, Gemini CLI, e
 ## 执行循环
 
 1. `./ai next <spec-id>` 取下一个 ready task（或人工指定 task-id）
-2. `./ai work <spec-id> <task-id>` 切任务分支（脚本会 stash 无关脏区）
+2. `./ai work <spec-id> <task-id>` 切任务分支（脚本会 stash 无关脏区）。分支来源按依赖判定（v2.1.2）：无依赖任务从 base 分支（默认 `main`，`AI_HARNESS_BASE_BRANCH` 可改）建——一任务一 PR 不夹带；依赖任务建在依赖的 feat 分支上（stacked 形态），门禁自动携带依赖产物，PR target 写依赖分支（如 `feat/<spec>-T1`）而非 main
 3. 按 task-dev skill 的规则实现 + 验证 + 更新 04-acceptance
 4. `AI_CONFIRM=1 ./ai done <spec-id> <task-id>` 跑质量门禁并本地提交（两种模式都自动提交，不在此处等人）
 5. 输出任务闭环摘要；`step-confirm` 模式下暂停等待人工确认是否继续下一个 task，`full-auto` 模式下直接进入下一个 task
