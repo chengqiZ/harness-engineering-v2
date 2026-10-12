@@ -35,17 +35,23 @@ worktree 落在 `.ai-harness/worktrees/<spec>-<task>`（可用 `AI_HARNESS_WT_DI
 1. 启动检查（与 serial-task 相同：仓库根、submodule、AGENTS/standards、git status）。
 2. spec 不存在 → 先走 spec-prep；spec 未过 check_spec → 停，先补 spec。
 3. `./ai ready <spec-id>` 取清单。空清单且全部完成 → 收尾出总报告。
-4. 对清单里的每个 task 派一个子代理（并发开满），子代理提示词模板：
+4. 对清单里的每个 task，**主代理先串行执行 `AI_CONFIRM=1 ./ai worktree <spec-id> <task-id>`**（领取标记由主代理写，子代理不碰进度文件——单一写者从这里开始），然后把工作区路径写进子代理提示词派发（并发开满）：
 
 ```text
 请读取 <业务仓库根>/.ai-harness/.ai-standards/skills/task-dev/SKILL.md。
-先执行 AI_CONFIRM=1 ./ai worktree <spec-id> <task-id> 创建你的隔离工作区，
-然后 cd 到输出的 worktree 路径，执行 ./ai work <spec-id> <task-id>，
+你的隔离工作区已由主代理创建：<业务仓库根>/.ai-harness/worktrees/<spec-id>-<task-id>。
+cd 到该路径后，执行 ./ai work <spec-id> <task-id>，
 按 task-dev skill 完成 <task-id> 的实现与验证，
 最后 AI_CONFIRM=1 ./ai done <spec-id> <task-id> 过门禁并提交。
 不要编辑 .ai-harness/specs/<spec-id>/03-tasks.md（进度文件由主代理统一管理），
+不要执行 ./ai worktree / ./ai collect（主代理专用命令），
 只做这一个 task，不要动其他文件，完成后报告 task-id、分支名、验证证据。
 ```
+
+> 为什么 worktree 由主代理跑：`./ai worktree` 会写 03-tasks.md 的 In-Flight 标记，
+> 若由 10 个子代理并发起跑执行，整文件重写互相覆盖会丢领取标记（真机复现过：
+> 标记丢失 → task 重回 ready → 补派第二个子代理 → 走 worktree exists 良性分支
+> → 两个子代理同工作区互踩）。领取是进度文件写操作，必须归唯一写者。
 
 5. 子代理陆续完成后（每次回收一个）：
    - `./ai collect <spec-id> <task-id>`；冲突时停下报告，不自动解决。
