@@ -49,6 +49,7 @@ usage:
   ./ai resume <spec-id>                # 从 03-tasks.md 的 Run Checkpoint 恢复
   ./ai skill <name>                    # 打印某阶段 SKILL.md 的路径（供宿主 agent 读取）
   ./ai pr <spec-id> <task-id> [target] # 生成 MR 材料文件并提交推送（改前确认）
+  ./ai report <spec-id> <task-id> [target] # collect 后生成 MR 材料（并行模式收尾）
 USAGE
 }
 
@@ -143,12 +144,32 @@ cmd_work() {
   # spec 未过占位检查时禁止进入开发（与 v1 Gate 一致：先有完整 spec 才许动代码）。
   bash "$(standards_script check_spec.sh)" "$spec_id" >/dev/null 2>&1 \
     || fail "spec $spec_id not ready: run bash $(standards_script check_spec.sh) $spec_id and fix the listed issues first"
+  task_dependencies_met "$tasks_file" "$task_id" "$spec_id" || fail "dependencies are not complete for task: $task_id"
+  # v2.1.2 依赖判定已放宽：勾选未进当前分支但依赖任务的 feat 分支存在时放行。
+  # 若依赖分支只是存在而 work 入口被拒，提示里给出 stacked 语义的出路。
   task_exists "$tasks_file" "$task_id" || fail "task id not found: $task_id"
   task_done "$tasks_file" "$task_id" && fail "task already marked done: $task_id"
-  task_dependencies_met "$tasks_file" "$task_id" || fail "dependencies are not complete for task: $task_id"
 
-  base_branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo HEAD)"
+  base_branch="${AI_HARNESS_BASE_BRANCH:-main}"
   branch="feat/$spec_id-$task_id"
+  # v2.1.2：一任务一 PR——base 不再取「当前分支」，改为按依赖判定：
+  # - 无依赖任务从 base 分支（默认 main）建：早期取当前分支时串行 T2 从
+  #   feat-T1 建，T2 的 PR 永远夹带 T1 的提交，「一任务一 PR」名存实亡。
+  # - 依赖任务链在依赖的 feat 分支上（业界 stacked-PR 形态：每层 PR 只含
+  #   增量，评审面积正确；T2 的 PR target 写 feat-T1）。
+  # - 多个依赖各有 feat 分支时，base 取最后一个、其余 merge 进来（冲突即停，
+  #   不自动解决）；依赖已 collect 进 base（分支已删）则天然包含。
+  local dep dep_base merge_deps=()
+  while IFS= read -r dep; do
+    [[ -z "$dep" ]] && continue
+    if git show-ref --verify --quiet "refs/heads/feat/$spec_id-$dep"; then
+      dep_base="feat/$spec_id-$dep"
+      merge_deps+=("$dep_base")
+    fi
+  done < <(task_dependencies "$tasks_file" "$task_id")
+  if [[ -n "${dep_base:-}" ]]; then
+    base_branch="$dep_base"
+  fi
   if [[ -n "$(git status --porcelain -- . ":(exclude)$HARNESS_DIR/specs/$spec_id")" ]]; then
     stash_name="ai-harness-before-$spec_id-$task_id-$(date +%Y%m%d-%H%M%S)"
     git stash push -u -m "$stash_name" -- . ":(exclude)$HARNESS_DIR/specs/$spec_id" >/dev/null
@@ -160,7 +181,14 @@ cmd_work() {
   elif git show-ref --verify --quiet "refs/heads/$branch"; then
     git switch "$branch"
   else
-    git switch -c "$branch"
+    git switch -c "$branch" "$base_branch"
+    # 多父依赖：其余依赖分支逐个 merge 进来（一般 0~1 个额外）；冲突即停，
+    # 不自动解决——与 collect 的冲突纪律一致。
+    for dep in "${merge_deps[@]:-${dep_base:-}}"; do
+      [[ -z "$dep" || "$dep" = "$base_branch" ]] && continue
+      git merge --no-edit "$dep" >/dev/null 2>&1 \
+        || fail "merge of dependency branch $dep into $branch conflicts; resolve manually and re-run"
+    done
   fi
   say "base branch: $base_branch"
   say "work branch: $branch"
@@ -413,11 +441,17 @@ task_dependencies() {
 }
 
 task_dependencies_met() {
-  local tasks_file="$1" task_id="$2" dep
+  # v2.1.2：spec_id 由调用方传入（依赖放宽判定需要探测 feat 分支是否已存在）。
+  local tasks_file="$1" task_id="$2" spec_id="${3:-}" dep
   while IFS= read -r dep; do
     [[ -z "$dep" ]] && continue
     task_exists "$tasks_file" "$dep" || fail "dependency task id not found: $dep"
-    task_done "$tasks_file" "$dep" || return 1
+    task_done "$tasks_file" "$dep" && continue
+    # v2.1.2 放宽：勾选未进当前分支但依赖任务的 feat 分支已存在（串行 stacked
+    # 形态：done 的勾选提交落在 feat/<spec>-<dep> 上，还没合回 base）。
+    # 分支存在=依赖已闭环过门禁，放行并让 work 把它 merge 进新分支。
+    [[ -n "$spec_id" ]] && git show-ref --verify --quiet "refs/heads/feat/$spec_id-$dep" && continue
+    return 1
   done < <(task_dependencies "$tasks_file" "$task_id")
   return 0
 }
@@ -532,6 +566,13 @@ cmd_worktree() {
   local tasks_file wt_path branch
   tasks_file="$HARNESS_DIR/specs/$spec_id/03-tasks.md"
   [[ -f "$tasks_file" ]] || fail "missing $tasks_file"
+  # v2.1.2：worktree 从上次提交建，主仓未提交的 spec 进不去——子代理会因
+  # missing 03-tasks.md 盲跑（实测实锤）。派发前 spec 必须干净且已提交。
+  local spec_uncommitted
+  spec_uncommitted="$(git status --porcelain -- "$HARNESS_DIR/specs/$spec_id" | head -1)"
+  if [[ -n "$spec_uncommitted" ]]; then
+    fail "spec $spec_id has uncommitted changes (worktree is created from the last commit, the sub-agent would miss them); commit the spec first: git add $HARNESS_DIR/specs/$spec_id && git commit"
+  fi
   # 与 ./ai work 相同的前置门禁：占位 spec 不许开发、依赖须完成；
   # 并行互斥：已完成或 in-flight 的 task 拒绝重复领取。
   bash "$(standards_script check_spec.sh)" "$spec_id" >/dev/null 2>&1 \
@@ -539,7 +580,7 @@ cmd_worktree() {
   task_exists "$tasks_file" "$task_id" || fail "task id not found: $task_id"
   task_done "$tasks_file" "$task_id" && fail "task already marked done: $task_id"
   task_in_flight "$tasks_file" "$task_id" && fail "task already claimed by another agent: $task_id"
-  task_dependencies_met "$tasks_file" "$task_id" || fail "dependencies are not complete for task: $task_id"
+  task_dependencies_met "$tasks_file" "$task_id" "$spec_id" || fail "dependencies are not complete for task: $task_id"
 
   branch="feat/$spec_id-$task_id"
   wt_path="$WT_DIR/${spec_id}-${task_id}"
@@ -554,6 +595,10 @@ cmd_worktree() {
   # 机械层在这里统一拉起（本地路径协议需放行 file）。
   git -c protocol.file.allow=always -C "$wt_path" submodule update --init --recursive >/dev/null 2>&1 || true
   mark_in_flight "$tasks_file" "$spec_id" "$task_id"
+  # 领取标记必须随提交落盘：留在工作区会污染后续任务分支（task_done 的
+  # add -A 不区分 spec 内文件，标记会被捎带进子代理提交）。
+  git add "$tasks_file" && git commit -qm "chore(${spec_id}): claim task ${task_id} (in-flight)" \
+    || say "note: claim commit skipped (nothing to commit)"
   say "worktree: $wt_path"
   say "branch: $branch"
   say "next: cd $wt_path && ./ai work $spec_id $task_id"
@@ -636,6 +681,41 @@ PYEOF
 }
 
 # ---------------------------------------------------------------------------
+# report：collect 后生成 PR 材料（并行模式收尾专用）。
+#   collect 已把 task 分支合进当前分支并删除分支，此时 ./ai pr 因「不在任务
+#   分支上」被拒——并行模式的 PR 材料由本命令从 collect 提交反推：
+#   source=当前分支、diff=该 task 的 collect 合并提交（--first-parent 视角）。
+# ---------------------------------------------------------------------------
+cmd_report() {
+  local spec_id="$1" task_id="$2" target_branch="${3:-main}"
+  local current_branch merge_commit diffstat pr_dir pr_file
+  current_branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo HEAD)"
+  [[ "$current_branch" != "$target_branch" ]] \
+    || fail "already on target branch $target_branch; nothing to report — push directly: git push origin $target_branch"
+  # 找该 task 的 collect 合并提交（chore(<spec>): collect parallel task <task>）
+  merge_commit="$(git log --first-parent --grep="chore(${spec_id}): collect parallel task ${task_id}\$" -n1 --format=%H || true)"
+  [[ -n "$merge_commit" ]] \
+    || fail "no collect commit found for $task_id (collect runs: chore(${spec_id}): collect parallel task ${task_id}); did you run ./ai collect?"
+  diffstat="$(git show --first-parent --shortstat --format= "$merge_commit" 2>/dev/null | head -1)"
+  pr_dir="$HARNESS_DIR/pr"
+  mkdir -p "$pr_dir"
+  pr_file="$pr_dir/${spec_id}-${task_id}-mr.md"
+  {
+    printf '# MR Material (collected)\n\n'
+    printf -- '- Spec: `.ai-harness/specs/%s/`\n- Task ID: `%s`\n' "$spec_id" "$task_id"
+    printf -- '- Source branch: `%s` (task branch collected via merge %s)\n' "$current_branch" "$(git rev-parse --short "$merge_commit")"
+    printf -- '- Target branch: `%s`\n' "$target_branch"
+    printf -- '- Diff (this task only): %s\n\n' "${diffstat:-no diff}"
+    printf '## MR Description\n\n(Paste the description produced by the pr-prep skill.)\n'
+    printf '## Merge Commit\n\n%s\n\n' "$(git show --no-patch --format='%h %s' "$merge_commit")"
+    printf '## Task-level Validation Evidence\n\nSee .ai-harness/specs/%s/04-acceptance.md and .gate-log/\n' "$spec_id"
+  } > "$pr_file"
+  say "mr material: $pr_file"
+  say "next: push $current_branch and open MR into $target_branch using the material file"
+  say "note: GitLab/GitHub MR was not created automatically; use the material file."
+}
+
+# ---------------------------------------------------------------------------
 main() {
   local cmd="${1:-}"
   shift || true
@@ -648,6 +728,7 @@ main() {
     worktree) [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_worktree "$1" "$2" ;;
     collect) [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_collect "$1" "$2" ;;
     unclaim) [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_unclaim "$1" "$2" ;;
+    report) [[ $# -ge 2 && $# -le 3 ]] || { usage; exit 1; }; cmd_report "$@" ;;
     done)   [[ $# -eq 2 ]] || { usage; exit 1; }; cmd_done "$1" "$2" ;;
     pr)     [[ $# -ge 2 && $# -le 3 ]] || { usage; exit 1; }; cmd_pr "$@" ;;
     run)    [[ $# -ge 1 ]] || { usage; exit 1; }; cmd_run "$@" ;;

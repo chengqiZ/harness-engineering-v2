@@ -56,7 +56,7 @@ cd 到该路径后，执行 ./ai work <spec-id> <task-id>，
 5. 子代理陆续完成后（每次回收一个）：
    - `./ai collect <spec-id> <task-id>`；冲突时停下报告，不自动解决。
    - 回收后重跑 `./ai ready`——新 task 的依赖可能刚被解锁，继续派发。
-6. 所有 task 完成后：汇总每个 task 的 task-id、验证证据、diffstat，输出总报告（含 risks、rollback、pending items）；人工评审统一在 push 前（`./ai pr` 确认门），不是逐 task 评审。
+6. 所有 task 完成后：汇总每个 task 的 task-id、验证证据、diffstat，输出总报告（含 risks、rollback、pending items）；人工评审统一在 push 前（`./ai pr` 确认门），不是逐 task 评审。MR 材料用 `./ai report <spec-id> <task-id> [target]` 逐 task 生成（collect 已删任务分支，`./ai pr` 不可用；report 从 collect 合并提交反推该 task 的增量 diff）。
 
 # 派发纪律
 
